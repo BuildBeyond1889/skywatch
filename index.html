@@ -92,6 +92,15 @@ body.red.ar #redwash { display: block; }
 #notLive { align-self: center; border: 1px solid rgba(255,180,90,0.6); background: rgba(40,22,6,0.88); color: #ffd9a8; font-size: 10.5px; height: 32px; }
 body.red #notLive { color: var(--fg); border-color: var(--line); background: var(--panel-ar); }
 body.ar .chip[aria-pressed="true"] { background: var(--chip); }
+#famPill { align-self: center; border: 1px solid rgba(255,211,122,0.6); background: rgba(40,30,6,0.88); color: #ffe2a8; font-size: 10.5px; height: 32px; }
+#famPill .dot { background: #ffd37a; }
+body.red #famPill { color: var(--fg); border-color: var(--line); background: var(--panel-ar); }
+.hero .row { flex-wrap: wrap; }
+.cbars { display: flex; align-items: flex-end; gap: 2px; height: 70px; padding-bottom: 14px; }
+.cb { flex: 1; height: 100%; position: relative; display: flex; align-items: flex-end; border-radius: 3px; }
+.cb.night { background: rgba(140,170,255,0.09); }
+.cb i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: 0.85; }
+.cb span { position: absolute; bottom: -14px; left: 0; font: 9px var(--mono); color: var(--dim); white-space: nowrap; }
 #modeSeg { align-self: center; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; width: min(320px, 100%); }
 #modeSeg button { height: 32px; border: none; border-radius: 9px; background: transparent; color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 #modeSeg button[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); }
@@ -305,6 +314,7 @@ a { color: var(--accent); }
   <div id="tapeWrap" class="glass"><canvas id="tape"></canvas></div>
   <div id="readout" class="mono"><span>AZ <b id="roAz">–</b></span><span>ALT <b id="roAlt">–</b></span><span>FOV <b id="roFov">–</b></span><span id="roCount"><b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW</span></div>
   <button type="button" id="notLive" class="pill" hidden><span class="dot warn pulse"></span><span id="notLiveText">NOT LIVE</span><span style="opacity:.75">· TAP FOR LIVE</span></button>
+  <button type="button" id="famPill" class="pill" hidden><span class="dot"></span><span id="famText">FAMILY</span><span style="opacity:.75">· TAP TO CLEAR</span></button>
   <div id="modeSeg" class="glass" role="group" aria-label="Mode"><button type="button" data-v="orbit">Orbit</button><button type="button" data-v="deep">Deep space</button><button type="button" data-v="meteor">Meteors</button></div>
 </div>
 
@@ -352,6 +362,11 @@ a { color: var(--accent); }
   <div class="sheet-body" id="tonightBody"></div>
 </section>
 
+<section class="sheet" id="sheetTime" aria-label="Time machine" aria-hidden="true">
+  <div class="sheet-head"><h2>Time machine</h2><button type="button" class="btn small" data-close>Done</button></div>
+  <div class="sheet-body" id="timeBody"></div>
+</section>
+
 <section class="sheet" id="sheetSettings" aria-label="Settings" aria-hidden="true">
   <div class="sheet-head"><h2>Settings</h2><button type="button" class="btn small" data-close>Done</button></div>
   <div class="sheet-body" id="settingsBody"></div>
@@ -378,8 +393,8 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=8"></script>
-<script src="deep.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="stars.js?v=9"></script>
+<script src="deep.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

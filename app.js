@@ -205,7 +205,7 @@
     f: Object.assign({ groups: Object.fromEntries(GROUPS.map(g => [g.id, g.on])), hMin: 0, hMax: 14, density: 'smart',
       layers: { stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true } }, ls.get('filters', {})),
     alarms: [], events: [], planetsAt: 0, starsAt: 0, libs: { sat: false, astro: false },
-    dprCap: 2, collapse: {}, noFeed: false, clear: false,
+    dprCap: 2, collapse: {}, noFeed: false, clear: false, rate: 1, tmBase: 0, family: null,
     view: 'orbit', deepPreset: 'all', feat: null, featObj: null, autoCatch: false, caught: 0, angVel: 0
   };
   S.f.groups = Object.assign(Object.fromEntries(GROUPS.map(g => [g.id, g.on])), S.f.groups || {});
@@ -370,7 +370,7 @@
     } catch (e) { /* ignore */ }
   }
   function passGroup(s) {
-    if (S.pinned.has(s.id) || s === S.sel) return true;
+    if (S.pinned.has(s.id) || s === S.sel || (S.family && s.launch === S.family.key)) return true;
     const pr = S.preset;
     if (pr === 'stations') return s.groups.has('stations');
     if (pr === 'starlink') return s.groups.has('starlink');
@@ -381,7 +381,7 @@
   function passFilter(s) {
     if (s.rec === false) return false;
     if (!passGroup(s)) return false;
-    if (S.pinned.has(s.id) || s === S.sel) return true;
+    if (S.pinned.has(s.id) || s === S.sel || (S.family && s.launch === S.family.key)) return true;
     const lo = H_STEPS[S.f.hMin], hi = H_STEPS[S.f.hMax];
     return s.meanAlt >= lo && s.meanAlt <= hi;
   }
@@ -428,7 +428,7 @@
     const st = satState(s, ctx);
     if (!st) { s.ok = false; return; }
     const t = ctx.date.getTime();
-    if (s.jump === S.jump && s.v && t - s.ts > 150 && t - s.ts < 6000) {
+    if (s.jump === S.jump && s.v && Math.abs(t - s.ts) > 150 && Math.abs(t - s.ts) < 6000 * Math.max(1, Math.abs(S.rate))) {
       const dt = (t - s.ts) / 1000;
       s.rate = [(st.E - s.v[0]) / dt, (st.N - s.v[1]) / dt, (st.U - s.v[2]) / dt];
     } else if (s.jump !== S.jump) s.rate = [0, 0, 0];
@@ -436,7 +436,7 @@
     s.lit = st.lit; s.mag = st.mag; s.range = st.r; s.h = st.h; s.spd = st.spd;
   }
   function satDir(s, t) {
-    const k = clamp((t - s.ts) / 1000, -8, 8);
+    const lim = 8 * Math.max(1, Math.abs(S.rate)), k = clamp((t - s.ts) / 1000, -lim, lim);
     return [s.v[0] + s.rate[0] * k, s.v[1] + s.rate[1] * k, s.v[2] + s.rate[2] * k];
   }
   function updateSats(now, budget) {
@@ -676,6 +676,7 @@
     requestAnimationFrame(frame);
     const nowP = performance.now(), dt = clamp((nowP - lastFrame) / 1000, 0, 0.1); lastFrame = nowP; tick++;
     S.ft = (S.ft || 16) * 0.95 + 0.05 * dt * 1000;
+    if (S.rate !== 1) S.offset += (S.rate - 1) * dt * 1000;
     if (S.ft > 26 && nowP - (S.perfAt || 0) > 2500 && S.dprCap > 1) { S.dprCap = Math.max(1, S.dprCap - 0.5); S.perfAt = nowP; resize(); }
     if (!S.obs) return;
     const now = simNow(), tms = now.getTime();
@@ -696,7 +697,7 @@
       VM = viewMatrix(dt);
       VT = [VM[0], VM[3], VM[6], VM[1], VM[4], VM[7], VM[2], VM[5], VM[8]];
       FOC = focal();
-      if (tms - S.starsAt > 1000 || Math.abs(tms - S.starsAt) > 5000) { updateStars(now); S.starsAt = tms; }
+      if (tms - S.starsAt > 1000 || Math.abs(tms - S.starsAt) > 5000 || Math.abs(S.rate) > 1.5) { updateStars(now); S.starsAt = tms; }
       if (Math.abs(tms - S.planetsAt) > 5000) { updatePlanets(now); S.planetsAt = tms; }
       if (nowP - zoneAt > 1000) { zoneAt = nowP; updateZones(); }
       updateSats(now, S.scrubbing ? 10 : S.ft > 22 ? 3 : 6);
@@ -921,8 +922,11 @@
   function roundRect(x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
 
   function satVisibleNow(s, sunAlt) { return s.lit && sunAlt < -6 && s.mag < 5.2; }
+  const SAT_RANGE = 21 * 864e5;
   function drawSats(t, placed, dens, sunAlt) {
     if (!S.libs.sat) return;
+    if (Math.abs(t - Date.now()) > SAT_RANGE) { S.counts = { up: 0, inView: 0 }; return; }
+    const fam = S.family;
     let up = 0, inView = 0;
     const buckets = new Map(), cands = [], near = [];
     const visOnly = S.preset === 'visible';
@@ -937,8 +941,9 @@
       const p = project(v); if (!onScreen(p, 6)) continue;
       inView++;
       const gcol = (GBY.get(s.prim) || GROUPS[0]).col;
-      const key = s.lit ? gcol : '#56607e';
-      let b = buckets.get(key); if (!b) { b = []; buckets.set(key, b); } b.push(p.x, p.y, s.lit ? (s.mag < 3 ? 3.2 : 2.4) : 2);
+      const isFam = fam && s.launch === fam.key;
+      const key = isFam ? 'FAM' : s.lit ? gcol : '#56607e';
+      let b = buckets.get(key); if (!b) { b = []; buckets.set(key, b); } b.push(p.x, p.y, isFam ? 4 : s.lit ? (s.mag < 3 ? 3.2 : 2.4) : 2);
       hits.push({ x: p.x, y: p.y, r: 20, o: s, pr: SPECIAL[s.id] ? 6 : 2 });
       const dc = Math.hypot(p.x - W / 2, p.y - H / 2); if (dc < FOC * Math.tan(3 * D2R)) near.push({ s, d: dc });
       let score = 0;
@@ -948,12 +953,18 @@
       if (s.groups.has('last-30-days')) score += 60;
       if (s.lit) score += 80 - s.mag * 8;
       if (s.groups.has('visual')) score += 25;
+      if (isFam) score += 400;
       cands.push({ s, p, score });
     }
     for (const [col, arr] of buckets) {
-      g.fillStyle = C(col, col === '#56607e' ? 0.75 : 0.95);
+      if (col === 'FAM') {
+        g.fillStyle = C('#ffd37a', 0.22);
+        for (let i = 0; i < arr.length; i += 3) { g.beginPath(); g.arc(arr[i], arr[i + 1], 7, 0, 6.283); g.fill(); }
+        g.fillStyle = C('#ffd37a');
+      } else g.fillStyle = C(col, (col === '#56607e' ? 0.75 : 0.95) * (fam ? 0.25 : 1));
       for (let i = 0; i < arr.length; i += 3) { const z = arr[i + 2]; g.fillRect(arr[i] - z / 2, arr[i + 1] - z / 2, z, z); }
     }
+    if (fam) { let fu = 0; for (const x of A) if (x.launch === fam.key && x.ok && x.v && satDir(x, t)[2] > 0) fu++; fam.up = fu; }
     S.counts = { up, inView };
     near.sort((a, b) => a.d - b.d); centerEvents(near, sunAlt);
     cands.sort((a, b) => b.score - a.score);
@@ -1249,10 +1260,19 @@
     else { txt.textContent = 'Compass'; acc.textContent = S.compassAcc != null ? '±' + Math.round(S.compassAcc) + '°' : '±10°'; dot.classList.add('warn'); }
     const nl = $('#notLive');
     if (S.offset === 0) nl.hidden = true;
-    else { const m = Math.round(S.offset / 60000); nl.hidden = false; $('#notLiveText').textContent = 'NOT LIVE · ' + tfmt(now).toUpperCase() + ' (' + (Math.abs(m) >= 60 ? (Math.abs(m) / 60).toFixed(1).replace('.0', '') + ' H' : Math.abs(m) + ' MIN') + (m < 0 ? ' AGO' : ' AHEAD') + ')'; }
+    else {
+      nl.hidden = false;
+      const m = Math.round(S.offset / 60000), sameDay = now.toDateString() === new Date().toDateString();
+      const when = sameDay ? tfmt(now).toUpperCase() + ' (' + (Math.abs(m) >= 60 ? (Math.abs(m) / 60).toFixed(1).replace('.0', '') + ' H' : Math.abs(m) + ' MIN') + (m < 0 ? ' AGO' : ' AHEAD') + ')'
+        : now.toLocaleString([], { year: Math.abs(S.offset) > 300 * 864e5 ? 'numeric' : undefined, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).toUpperCase();
+      $('#notLiveText').textContent = (S.rate === 0 ? 'PAUSED · ' : S.rate !== 1 ? S.rate + '× · ' : 'NOT LIVE · ') + when + (Math.abs(S.offset) > SAT_RANGE ? ' · NO SATELLITES' : '');
+    }
+    const fp = $('#famPill');
+    if (!S.family) fp.hidden = true; else { fp.hidden = false; $('#famText').textContent = S.family.label.toUpperCase() + ' · ' + (S.family.up || 0) + ' UP'; }
     const lb = $('#liveBtn');
-    if (S.offset === 0) { lb.classList.remove('off'); $('#liveText').textContent = 'LIVE ' + now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }); }
-    else { lb.classList.add('off'); const m = Math.round(S.offset / 60000); $('#liveText').textContent = (m > 0 ? '+' : '−') + Math.abs(m) + ' MIN · ' + tfmt(now) + ' · TAP FOR LIVE'; }
+    if (S.offset === 0 && S.rate === 1) { lb.classList.remove('off'); $('#liveText').textContent = 'LIVE ' + now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }); }
+    else { lb.classList.add('off'); $('#liveText').textContent = now.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' }).toUpperCase() + ' · TIME MACHINE'; }
+    if (S.offset === 0 && S.rate === 1) $('#liveText').textContent += ' · TIME MACHINE';
   }
   function drawTape(az) {
     const w = tape.width / DPR, h = tape.height / DPR;
@@ -1354,8 +1374,8 @@
         <div class="stats">${stat('ALT', fmt(o.h), 'km')}${stat('VEL', o.spd.toFixed(2), 'km/s')}${stat('RANGE', fmt(o.range), 'km')}${stat('MAG', o.lit && alt > 0 ? o.mag.toFixed(1) : '—')}</div>
         <div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}° · ${alt.toFixed(1)}° UP</span><span>ORBIT ${fmt(o.perigee)}×${fmt(o.apogee)} KM · ${o.period.toFixed(0)} MIN</span><span>DATA ${ageD.toFixed(1)} D OLD</span></div>
         <div class="card-foot"><span>${next}</span></div>
-        ${aboutHTML(o)}${o.id === 25544 || o.id === 48274 ? crewHTML(o.id) : ''}
-        <div class="card-actions">${o.next && o.next !== 'none' ? '<button type="button" class="btn small" id="calBtn">Add to calendar</button><button type="button" class="btn small" id="remindBtn">Remind me</button>' : ''}<button type="button" class="btn small" id="seenBtn">Seen it</button><button type="button" class="btn small" id="jumpBtn">${o.next && o.next !== 'none' ? 'Preview pass' : 'Centre it'}</button></div>`;
+        ${aboutHTML(o)}${S.family && S.family.key === o.launch ? `<div class="about"><b>${esc(S.family.label)}</b><span class="muted" style="font-size:12px">${esc(S.family.story)}</span><div class="kv"><span>Highlighted</span><span>${S.family.n} OBJECTS · ${S.family.up || 0} ABOVE YOU NOW</span></div></div>` : ''}${o.id === 25544 || o.id === 48274 ? crewHTML(o.id) : ''}
+        <div class="card-actions">${o.next && o.next !== 'none' ? '<button type="button" class="btn small" id="calBtn">Add to calendar</button><button type="button" class="btn small" id="remindBtn">Remind me</button>' : ''}<button type="button" class="btn small" id="seenBtn">Seen it</button><button type="button" class="btn small" id="famBtn">${S.family && S.family.key === o.launch ? 'Hide family' : 'Show family (' + Sats.list.filter(x => x.launch === o.launch).length + ')'}</button><button type="button" class="btn small" id="jumpBtn">${o.next && o.next !== 'none' ? 'Preview pass' : 'Centre it'}</button></div>`;
     } else if (o.kind === 'star') {
       const alt = altOf(o.v), az = azOf(o.v), yr = new Date().getFullYear();
       html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
@@ -1443,6 +1463,7 @@
     const mini = $('.mini', card); if (mini) mini.onclick = flip;
     const cc = $('#cardClose', card); if (cc) cc.onclick = () => select(null);
     const sb = $('#seenBtn', card); if (sb) sb.onclick = () => logSeen(o);
+    const fb = $('#famBtn', card); if (fb) fb.onclick = () => setFamily(S.family && S.family.key === o.launch ? null : o);
     const cb = $('#calBtn', card); if (cb) cb.onclick = () => passToCalendar(o, o.next);
     const sc = $('#showerCal', card); if (sc) sc.onclick = () => { const f = o.kind === 'meteorhome' ? S.featObj : o; showerToCalendar(f); };
     const tm = $('#toMeteor', card); if (tm) tm.onclick = () => { S.feat = o.name; setView('meteor'); };
@@ -1498,6 +1519,27 @@
     if (o.kind === 'probe') return close + line(o.short || o.name, (o.jwst ? '1.5M KM' : (probeAU(o, now) * 0.1496).toFixed(1) + 'B KM') + ' · ' + (o.v && altOf(o.v) > 0 ? pos(o.v) : 'BELOW HORIZON'));
     if (o.kind === 'shower') return close + line(o.name, 'PEAK ' + o.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase() + ' · ~' + o.zhr + '/HR');
     return close + line(o.kind === 'moon' ? moonPhaseName(o.phase) : o.name, (o.mag != null && o.kind !== 'moon' ? 'MAG ' + o.mag.toFixed(1) + ' · ' : '') + pos(o.v));
+  }
+
+  // ---------- family: everything from the same launch (or the same breakup) ----------
+  const FAMILY_STORY = {
+    '93036': ['Cosmos 2251 debris', 'In February 2009 the dead Russian satellite Cosmos 2251 hit the working Iridium 33 at about 11.7 km/s, the first accidental crash between two satellites. Every highlighted piece came from it.'],
+    '97051': ['Iridium 33 debris', 'The other half of the 2009 collision with Cosmos 2251. The pieces are still circling Earth.'],
+    '99025': ['Fengyun-1C debris', 'In January 2007 China destroyed its own old weather satellite with a missile, making the biggest debris cloud ever recorded: over 3,000 tracked pieces.'],
+    '82092': ['Cosmos 1408 debris', 'In November 2021 Russia blew up Cosmos 1408 with a missile test. The ISS crew had to shelter in their capsules as the cloud passed.'],
+    '98067': ['The ISS family', 'Everything sharing the ISS’s launch code: the station itself plus small satellites released from its airlock.']
+  };
+  function familyOf(s) {
+    const key = s.launch, n = Sats.list.filter(x => x.launch === key).length;
+    const code = (+key.slice(0, 2) < 57 ? '20' : '19') + key.slice(0, 2) + '-' + key.slice(2);
+    const st = FAMILY_STORY[key];
+    if (st) return { key, n, label: st[0], story: st[1] };
+    if (s.groups.has('starlink')) return { key, n, label: 'Starlink launch ' + code, story: n + ' satellites launched together on one rocket. New batches fly in a line, a “train”, before spreading out to their final orbits.' };
+    return { key, n, label: 'Launch ' + code, story: n + ' loaded object' + (n === 1 ? '' : 's') + ' from the same launch: satellites, the rocket stage and any debris it left.' };
+  }
+  function setFamily(s) {
+    S.family = s ? familyOf(s) : null; rebuildActive(); cardFor = null;
+    if (S.family) toast(S.family.label + ': ' + S.family.n + ' objects highlighted in gold.', 3500);
   }
 
   // ---------- what is it: CelesTrak satellite catalog ----------
@@ -1638,7 +1680,7 @@
       if (!v || altOf(v) < 0) { toast((SPECIAL[o.id] || o.name) + ' is below your horizon right now, so it can’t be seen. Log it during a pass.'); return; }
       if (!o.lit) { toast((SPECIAL[o.id] || o.name) + ' is in Earth’s shadow right now, so it’s dark. Log it when it’s sunlit.'); return; }
     } else if (o.v && altOf(o.v) < 0) { toast(o.name + ' is below your horizon right now.'); return; }
-    if (S.offset !== 0) { toast('Go back to LIVE time to log a sighting.'); return; }
+    if (S.offset !== 0 || S.rate !== 1) { toast('Go back to LIVE time to log a sighting.'); return; }
     const before = logStats().earned;
     const e = Object.assign({ t: Date.now(), k: o.kind, id: o.kind === 'sat' ? o.id : o.name, name: o.kind === 'sat' ? (SPECIAL[o.id] || o.name) : (o.kind === 'dso' ? dsoLabel(o) : o.name) }, extra || {});
     if (o.kind === 'sat') { e.mag = o.mag < 50 ? +o.mag.toFixed(1) : null; e.train = o.groups.has('starlink') && o.meanAlt < 430; const v = o.v && satDir(o, Date.now()); e.alt = v ? Math.round(altOf(v)) : null; }
@@ -1684,6 +1726,86 @@
     $('#seenText').textContent = 'Seen ' + (SPECIAL[s.id] || prettyName(s.name)) + '? Tap to log';
     b.onclick = () => { logSeen(s); b.hidden = true; };
     clearTimeout(PING.hideT); PING.hideT = setTimeout(() => { b.hidden = true; PING.seenFor = null; }, 7000);
+  }
+
+  // ---------- ISS (and Tiangong) crossing the Moon or Sun ----------
+  function bodyDir(name, date) {
+    const lst = gmst(date) + S.obs.lon * D2R;
+    if (name === 'Sun') { const su = sunEci(date); return refract(eqToEnu(su.ra, su.dec, lst, S.obs)); }
+    const A = window.Astronomy, ob = new A.Observer(S.obs.lat, S.obs.lon, S.obs.hKm * 1000);
+    const eq = A.Equator('Moon', date, ob, true, true), hz = A.Horizon(date, ob, eq.ra, eq.dec, 'normal');
+    return vecAA(hz.azimuth, hz.altitude);
+  }
+  let transitCache = null;
+  async function findTransits(days) {
+    if (transitCache && Date.now() - transitCache.t < 3600e3 && transitCache.lat === S.obs.lat) return transitCache.list;
+    const out = [];
+    for (const id of [25544, 48274]) {
+      const s = Sats.byId.get(id); if (!s) continue;
+      const passes = await findPasses(s, new Date(), days * 24, { max: 400 });
+      let n = 0;
+      for (const p of passes) {
+        if (p.maxEl < 12) continue;
+        const t0 = p.start - 150e3, t1 = p.end + 150e3, mid = new Date(p.maxT);
+        for (const body of ['Sun', 'Moon']) {
+          if (body === 'Moon' && !S.libs.astro) continue;
+          const bv0 = bodyDir(body, new Date(t0)), bv1 = bodyDir(body, new Date(t1));
+          if (altOf(bodyDir(body, mid)) < 4) continue;
+          let best = null;
+          for (let t = t0; t <= t1; t += 2000) {
+            const k = (t - t0) / (t1 - t0), bv = [bv0[0] + (bv1[0] - bv0[0]) * k, bv0[1] + (bv1[1] - bv0[1]) * k, bv0[2] + (bv1[2] - bv0[2]) * k];
+            const st = satState(s, epochCtx(new Date(t))); if (!st) continue;
+            const sv = refract([st.E, st.N, st.U]), bn = Math.hypot(...bv), sn = Math.hypot(...sv);
+            const sep = Math.acos(clamp((sv[0] * bv[0] + sv[1] * bv[1] + sv[2] * bv[2]) / bn / sn, -1, 1)) * R2D;
+            if (!best || sep < best.sep) best = { t, sep, el: altOf(sv), range: st.r, sv };
+          }
+          if (!best || best.sep > 3) continue;
+          // refine to a tenth of a second and measure how fast it moves across the sky
+          let fine = best;
+          for (let t = best.t - 2500; t <= best.t + 2500; t += 100) {
+            const k = (t - t0) / (t1 - t0), bv = [bv0[0] + (bv1[0] - bv0[0]) * k, bv0[1] + (bv1[1] - bv0[1]) * k, bv0[2] + (bv1[2] - bv0[2]) * k];
+            const st = satState(s, epochCtx(new Date(t))); if (!st) continue;
+            const sv = refract([st.E, st.N, st.U]), sep = Math.acos(clamp((sv[0] * bv[0] + sv[1] * bv[1] + sv[2] * bv[2]) / Math.hypot(...bv) / Math.hypot(...sv), -1, 1)) * R2D;
+            if (sep < fine.sep) fine = { t, sep, el: altOf(sv), range: st.r, sv };
+          }
+          const a = satState(s, epochCtx(new Date(fine.t - 500))), b = satState(s, epochCtx(new Date(fine.t + 500)));
+          const speed = a && b ? Math.acos(clamp(a.E * b.E + a.N * b.N + a.U * b.U, -1, 1)) * R2D : 1;
+          out.push({ s, body, t: fine.t, sep: fine.sep, el: fine.el, range: fine.range, dur: 0.52 / Math.max(speed, 0.01), dist: fine.sep * D2R * fine.range / Math.max(Math.sin(Math.max(fine.el, 10) * D2R), 0.17), az: azOf(fine.sv) });
+        }
+        if (++n % 5 === 0) await sleep(0);
+      }
+    }
+    out.sort((x, y) => x.sep - y.sep);
+    transitCache = { t: Date.now(), lat: S.obs.lat, list: out };
+    return out;
+  }
+
+  // ---------- cloud forecast (Open-Meteo) ----------
+  async function cloudForecast() {
+    const o = S.obs, key = 'clouds:' + o.lat.toFixed(1) + ',' + o.lon.toFixed(1);
+    const j = await cachedJSON(key, 'https://api.open-meteo.com/v1/forecast?latitude=' + o.lat.toFixed(2) + '&longitude=' + o.lon.toFixed(2) + '&hourly=cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high&forecast_days=3&timezone=auto', 3600e3);
+    if (!j || !j.hourly || !j.hourly.time) return null;
+    const off = (j.utc_offset_seconds || 0) * 1000;
+    return j.hourly.time.map((tt, i) => ({ t: Date.parse(tt + ':00Z') - off, c: j.hourly.cloud_cover[i], low: (j.hourly.cloud_cover_low || [])[i], high: (j.hourly.cloud_cover_high || [])[i] }));
+  }
+  function cloudAt(cf, t) { if (!cf) return null; let b = null; for (const h of cf) if (!b || Math.abs(h.t - t) < Math.abs(b.t - t)) b = h; return b && Math.abs(b.t - t) < 2 * 3600e3 ? b.c : null; }
+  function cloudHTML(cf) {
+    if (!cf) return '<p class="muted">Cloud forecast unavailable right now.</p>';
+    const now = Date.now(), hrs = cf.filter(h => h.t >= now - 3600e3).slice(0, 24);
+    const dark = h => sunAltAt(new Date(h.t + 1800e3), S.obs) < -6;
+    // tonight's clear window
+    const night = hrs.filter(dark); let win = null, cur = null;
+    for (const h of night) { if (h.c < 30) { if (!cur) cur = { a: h.t, b: h.t }; else if (h.t - cur.b <= 3600e3) cur.b = h.t; else { if (!win || cur.b - cur.a > win.b - win.a) win = cur; cur = { a: h.t, b: h.t }; } } else { if (cur && (!win || cur.b - cur.a > win.b - win.a)) win = cur; cur = null; } }
+    if (cur && (!win || cur.b - cur.a > win.b - win.a)) win = cur;
+    let sum;
+    if (win) sum = win.b === win.a ? 'Clearest around ' + tfmt(new Date(win.a)) : 'Clear from ' + tfmt(new Date(win.a)) + ' to ' + tfmt(new Date(win.b + 3600e3));
+    else if (night.length) { const m = night.reduce((x, y) => y.c < x.c ? y : x); sum = m.c > 80 ? 'Cloudy all night' : 'Best chance around ' + tfmt(new Date(m.t)) + ' (' + Math.round(m.c) + '% cloud)'; }
+    else sum = 'No dark hours in the next day';
+    const bars = hrs.map((h, i) => {
+      const c = Math.round(h.c), col = c < 30 ? 'var(--good)' : c < 65 ? 'var(--warn)' : 'var(--dim)', d = new Date(h.t);
+      return `<div class="cb${dark(h) ? ' night' : ''}" title="${tfmt(d)}: ${c}% cloud"><i style="height:${Math.max(4, c)}%;background:${col}"></i>${i % 3 === 0 ? `<span>${d.toLocaleTimeString([], { hour: 'numeric' }).replace(' ', '').toLowerCase()}</span>` : ''}</div>`;
+    }).join('');
+    return `<div class="hero" style="gap:8px"><div class="row" style="justify-content:space-between"><b style="font:700 16px var(--display)">${esc(sum)}</b><span class="mono" style="font-size:10px;color:var(--dim)">NOW ${Math.round(hrs[0] ? hrs[0].c : 0)}%</span></div><div class="cbars" role="img" aria-label="Cloud cover for the next 24 hours">${bars}</div><div class="mono" style="font-size:9.5px;color:var(--dim)">BAR HEIGHT = % OF SKY COVERED · SHADED = DARK HOURS · OPEN-METEO</div></div>`;
   }
 
   // ---------- calendar reminders (work even when the app is closed) ----------
@@ -1964,13 +2086,43 @@
   // ---------- time ----------
   function setOffset(ms) {
     S.offset = ms; S.jump++; trailsAt = 0; S.starsAt = 0; S.planetsAt = 0;
-    const m = Math.round(ms / 60000);
-    $('#scrub').value = clamp(m, -120, 120);
+    $('#scrub').value = clamp(Math.round((ms - S.tmBase) / 60000), -120, 120);
   }
-  $('#scrub').addEventListener('input', e => { S.scrubbing = true; setOffset(parseInt(e.target.value, 10) * 60000); });
+  function goLive() { S.tmBase = 0; S.rate = 1; setOffset(0); $('#scrub').value = 0; }
+  function timeJump(target, msg) {
+    S.tmBase = target - Date.now(); setOffset(S.tmBase); $('#scrub').value = 0; closeSheets();
+    const far = Math.abs(S.tmBase) > SAT_RANGE;
+    toast((msg ? msg + ' ' : 'Showing ' + new Date(target).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) + '. ') + (far ? 'Satellites only show within 3 weeks of today; stars, planets and the Moon are exact. ' : '') + 'Tap the orange bar for live.', 5000);
+  }
+  $('#scrub').addEventListener('input', e => { S.scrubbing = true; setOffset(S.tmBase + parseInt(e.target.value, 10) * 60000); });
   $('#scrub').addEventListener('change', () => { S.scrubbing = false; });
-  $('#liveBtn').addEventListener('click', () => setOffset(0));
-  $('#notLive').addEventListener('click', () => { setOffset(0); toast('Back to live.'); });
+  $('#liveBtn').addEventListener('click', () => openSheet('sheetTime'));
+  $('#notLive').addEventListener('click', () => { goLive(); toast('Back to live.'); });
+  $('#famPill').addEventListener('click', () => { setFamily(null); toast('Family highlight off.'); });
+  function buildTime() {
+    const pad = n => String(n).padStart(2, '0'), d = simNow();
+    const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const at = (days, h, m) => { const x = new Date(); x.setDate(x.getDate() + days); x.setHours(h, m || 0, 0, 0); return x.getTime(); };
+    const picks = [['Tonight at 10 PM', at(new Date().getHours() >= 22 ? 1 : 0, 22)], ['Tomorrow before dawn', at(1, 5, 30)]];
+    try { if (S.libs.astro) { const fm = window.Astronomy.SearchMoonPhase(180, new Date(), 40); if (fm) { const x = new Date(fm.date); picks.push(['Next full Moon · ' + dfmt(x), x.getTime()]); } } } catch (e) { /* ignore */ }
+    const sh = nextShowers(new Date(), 3).find(x => x.zhr >= 10); if (sh) { const x = new Date(sh.peak); x.setDate(x.getDate() + 1); x.setHours(3, 0, 0, 0); picks.push([sh.name + ' peak night · ' + dfmt(x), x.getTime()]); }
+    picks.push(['Apollo 11 lands on the Moon · Jul 20, 1969', Date.UTC(1969, 6, 20, 20, 17)]);
+    picks.push(['Halley’s Comet’s last visit · Feb 9, 1986', Date.UTC(1986, 1, 9, 10, 0)]);
+    $('#timeBody').innerHTML = `
+      <div class="sec-label">Jump to any date and time</div>
+      <div class="inline"><input type="datetime-local" id="tmInput" step="60" value="${local}" aria-label="Date and time" style="flex:1 1 200px"><button type="button" class="btn primary small" id="tmGo">Go</button></div>
+      <div class="sec-label">Quick picks</div>
+      <div class="list">${picks.map((pk, i) => `<div class="event go" role="button" tabindex="0" data-tm="${i}"><div class="grow"><div class="h"><b>${esc(pk[0])}</b></div><div class="m">${esc(new Date(pk[1]).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }).toUpperCase())}</div></div></div>`).join('')}</div>
+      <div class="sec-label">Playback speed</div>
+      <div class="seg" id="rateSeg">${[[0, 'Pause'], [1, '1×'], [10, '10×'], [100, '100×'], [1000, '1000×']].map(r => `<button type="button" data-r="${r[0]}" aria-pressed="${S.rate === r[0]}">${r[1]}</button>`).join('')}</div>
+      <p class="muted" style="margin:0">At 100× a whole ISS orbit takes under a minute. At 1000× you watch the night sky turn.</p>
+      <button type="button" class="btn" id="tmLive">Back to live</button>
+      <p class="muted" style="margin:0;font-size:11.5px">Satellites only show within about 3 weeks of today, because orbit data can’t predict further. Stars, planets and the Moon are exact for any date.</p>`;
+    $('#tmGo').onclick = () => { const v = $('#tmInput').value; const t = new Date(v).getTime(); if (!isFinite(t)) return toast('Pick a date and time first.'); timeJump(t); };
+    $$('#timeBody [data-tm]').forEach(el => el.onclick = () => { const pk = picks[+el.dataset.tm]; timeJump(pk[1], 'Showing ' + pk[0].split(' · ')[0] + '.'); });
+    $$('#rateSeg button').forEach(b => b.onclick = () => { S.rate = +b.dataset.r; S.jump++; buildTime(); toast(S.rate === 0 ? 'Time paused.' : S.rate === 1 ? 'Normal speed.' : 'Playing at ' + S.rate + '×.'); });
+    $('#tmLive').onclick = () => { goLive(); closeSheets(); toast('Back to live.'); };
+  }
 
   // ---------- chips & filters ----------
   function renderChips() {
@@ -2069,6 +2221,7 @@
     if (id === 'sheetTonight') buildTonight();
     if (id === 'sheetSettings') buildSettings();
     if (id === 'sheetGallery') buildGallery();
+    if (id === 'sheetTime') buildTime();
   }
   function closeSheets() { $$('.sheet').forEach(s => { s.classList.remove('open'); s.setAttribute('aria-hidden', 'true'); }); $('#scrim').classList.remove('on'); }
   $('#scrim').onclick = () => closeSheets();
@@ -2104,6 +2257,17 @@
     closeSheets();
     const k = go.split(':')[0], v = go.slice(go.indexOf(':') + 1);
     if (k === 'shower') { S.feat = v; setView('meteor'); return; }
+    if (k === 'transit') {
+      const [id, tt, body] = v.split(':'), st = Sats.byId.get(+id); if (!st) return;
+      if (S.view !== 'orbit') setView('orbit');
+      S.pinned.add(st.id); rebuildActive();
+      S.rate = 1; timeJump(+tt - 15000, 'Jumping to 15 s before the ' + SPECIAL[st.id] + ' crosses the ' + body + '.');
+      select(st);
+      const bv = bodyDir(body, new Date(+tt));
+      if (S.mode === 'sky') { S.viewAz = azOf(bv); S.viewAlt = clamp(altOf(bv), 2, 85); S.zoom = 5; }
+      else toast('Point at the ' + body + ', ' + cardinal(azOf(bv)) + ' ' + Math.round(altOf(bv)) + '° up. Pinch to zoom in.', 5000);
+      return;
+    }
     let o = null;
     if (k === 'sat' || k === 'new') o = Sats.byId.get(+v);
     else if (k === 'planet') o = PLANETS.find(p => p.name === v);
@@ -2153,7 +2317,9 @@
       } catch (e) { /* ignore */ }
     }
     const conds = `<div class="conds"><div><span>MOON</span><span>${MOON.v ? Math.round(MOON.frac * 100) + '%' : '—'}</span></div><div><span>SUNSET</span><span>${sunset ? tfmt(sunset).replace(' ', '') : '—'}</span></div><div><span>DARK</span><span>${dark ? tfmt(dark).replace(' ', '') : '—'}</span></div><div><span>SUN</span><span>${SUN.v ? Math.round(altOf(SUN.v)) + '°' : '—'}</span></div></div>`;
-    parts.push(conds);
+    const cf = await cloudForecast();
+    parts.push(conds.replace('<div><span>SUN</span><span>' + (SUN.v ? Math.round(altOf(SUN.v)) + '°' : '—') + '</span></div>', '<div><span>CLOUDS</span><span>' + (cloudAt(cf, Date.now()) != null ? Math.round(cloudAt(cf, Date.now())) + '%' : '—') + '</span></div>'));
+    parts.push('<div class="sec-label">Cloud forecast</div>' + cloudHTML(cf));
     parts.push(`<p class="muted mono" style="margin:-6px 0 0;font-size:10.5px">${S.locSource === 'gps' ? 'YOUR GPS LOCATION' : S.locSource === 'manual' ? 'LOCATION SET BY HAND' : 'APPROXIMATE LOCATION, SET IT IN SETTINGS'} · ${o.lat.toFixed(1)}°, ${o.lon.toFixed(1)}°</p>`);
 
     // station passes
@@ -2166,7 +2332,7 @@
       const bp = best.p, nm = SPECIAL[best.s.id]; S.bestPass = best;
       const mins = Math.round((bp.vStart - Date.now()) / 60000);
       parts.push(`<div class="sec-label">Best pass</div><div class="hero"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><div class="mono" style="font-size:9.5px;letter-spacing:1.4px;color:var(--accent)">${esc(nm.toUpperCase())} FLYOVER</div><div style="font:700 20px var(--display)">${dfmt(new Date(bp.vStart))}</div></div><div style="text-align:right"><div class="mono" style="font-size:20px;font-weight:600">${tfmt(new Date(bp.vStart))}</div><div class="mono" style="font-size:9.5px;color:var(--dim)">${mins > 0 ? 'IN ' + (mins >= 60 ? Math.floor(mins / 60) + 'H ' : '') + (mins % 60) + 'M' : 'NOW'}</div></div></div>
-        <div class="mono" style="font-size:10.5px;color:var(--dim);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>RISES ${cardinal(bp.vStartAz)}</span><span>MAX ${Math.round(bp.maxEl)}°</span><span>SETS ${cardinal(bp.vEndAz)}</span><span>MAG ${bp.mag.toFixed(1)}</span><span>${Math.max(1, Math.round((bp.vEnd - bp.vStart) / 60000))} MIN</span></div>
+        <div class="mono" style="font-size:10.5px;color:var(--dim);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>RISES ${cardinal(bp.vStartAz)}</span><span>MAX ${Math.round(bp.maxEl)}°</span><span>SETS ${cardinal(bp.vEndAz)}</span><span>MAG ${bp.mag.toFixed(1)}</span>${cloudAt(cf, bp.vStart) != null ? '<span>CLOUD ' + Math.round(cloudAt(cf, bp.vStart)) + '%</span>' : ''}<span>${Math.max(1, Math.round((bp.vEnd - bp.vStart) / 60000))} MIN</span></div>
         <div class="row"><button type="button" class="btn primary small" data-remind="${best.s.id}:${bp.vStart}:${Math.round(bp.vStartAz)}">Remind me</button><button type="button" class="btn small" data-go="sat:${best.s.id}">Show me</button><button type="button" class="btn small" data-cal="${best.s.id}">Add to calendar</button><button type="button" class="btn small" data-preview="${bp.maxT}" data-sel="${best.s.id}">Preview</button></div></div>`);
       evCount++;
       const rest = passes.filter(x => x !== best).slice(0, 5);
@@ -2213,6 +2379,18 @@
         if (hrs < 24) evCount++;
       }
     }
+    // ISS / Tiangong crossing the Moon or Sun
+    try {
+      const tr = (await findTransits(10)).slice(0, 4);
+      const rows = tr.map(x => {
+        const nm = SPECIAL[x.s.id], d = new Date(x.t), hit = x.sep < 0.25;
+        const when = dfmt(d).toUpperCase() + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+        const desc = hit ? `Crosses the ${x.body} as seen from your spot. The crossing lasts about ${x.dur.toFixed(1)} s.` : `Misses the ${x.body} by ${x.sep.toFixed(1)}° from here. Move about ${fmt(Math.max(1, Math.round(x.dist)))} km to see it cross.`;
+        return evGo('transit:' + x.s.id + ':' + x.t + ':' + x.body, x.body === 'Sun' ? 'boost' : 'moon', x.body === 'Sun' ? '#ffd37a' : '#c9d6f5', nm + ' × ' + x.body + (hit ? ' · DIRECT HIT' : ''), when, desc,
+          `${x.body.toUpperCase()} ${Math.round(x.el)}° UP · ${cardinal(x.az)}${x.body === 'Sun' ? ' · NEVER LOOK AT THE SUN WITHOUT A SOLAR FILTER' : ''}`);
+      });
+      parts.push('<div class="sec-label">ISS crossing the Moon or Sun · next 10 days</div>' + (rows.length ? '<div class="list">' + rows.join('') + '</div><p class="muted" style="margin:0;font-size:11px">Exact times firm up as the day gets closer, so check again the day before. Tap one to jump to that second.</p>' : '<p class="muted">No close crossings from your location in the next 10 days.</p>'));
+    } catch (e) { /* skip */ }
     parts.push('<div class="sec-label">Happening in orbit</div>');
     parts.push(ev.length ? '<div class="list">' + ev.join('') + '</div>' : '<p class="muted">Loading orbit events needs the satellite data. Check your connection, then reopen this.</p>');
 
