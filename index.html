@@ -89,6 +89,9 @@ body.red.ar #redwash { display: block; }
 #readout { display: flex; justify-content: space-between; gap: 6px; font-size: 9.5px; letter-spacing: 0.4px; color: var(--dim); padding: 0 2px; pointer-events: none; }
 #readout b { color: var(--fg); font-weight: 500; }
 
+#notLive { align-self: center; border: 1px solid rgba(255,180,90,0.6); background: rgba(40,22,6,0.88); color: #ffd9a8; font-size: 10.5px; height: 32px; }
+body.red #notLive { color: var(--fg); border-color: var(--line); background: var(--panel-ar); }
+body.ar .chip[aria-pressed="true"] { background: var(--chip); }
 #modeSeg { align-self: center; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; width: min(320px, 100%); }
 #modeSeg button { height: 32px; border: none; border-radius: 9px; background: transparent; color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 #modeSeg button[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); }
@@ -153,8 +156,8 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 
 #controls { display: flex; align-items: center; gap: 8px; }
 #controls .icon-btn, #galleryBtn { flex: none; }
 #clearBtn svg { width: 20px; height: 20px; stroke: var(--fg); fill: none; stroke-width: 1.8; stroke-linecap: round; }
-body.clear #top, body.clear #lower, body.clear #banner, body.clear #crosshair { display: none !important; }
-#clearBar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--sb) + 16px); display: flex; gap: 4px; padding: 4px; border-radius: 999px; opacity: 0.8; }
+body.clear #top, body.clear #banner, body.clear #crosshair, body.clear #lower > :not(#card) { display: none !important; }
+#clearBar { position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--st) + 12px); display: flex; gap: 4px; padding: 4px; border-radius: 999px; opacity: 0.8; }
 #clearBar button { height: 38px; padding: 0 14px; border: none; border-radius: 999px; background: transparent; font-size: 12.5px; font-weight: 600; color: var(--fg); }
 #clearBar button + button { background: var(--chip); color: var(--chip-fg); }
 #cam.nofeed { opacity: 0; }
@@ -280,6 +283,7 @@ a { color: var(--accent); }
   </div>
   <div id="tapeWrap" class="glass"><canvas id="tape"></canvas></div>
   <div id="readout" class="mono"><span>AZ <b id="roAz">–</b></span><span>ALT <b id="roAlt">–</b></span><span>FOV <b id="roFov">–</b></span><span id="roCount"><b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW</span></div>
+  <button type="button" id="notLive" class="pill" hidden><span class="dot warn pulse"></span><span id="notLiveText">NOT LIVE</span><span style="opacity:.75">· TAP FOR LIVE</span></button>
   <div id="modeSeg" class="glass" role="group" aria-label="Mode"><button type="button" data-v="orbit">Orbit</button><button type="button" data-v="deep">Deep space</button><button type="button" data-v="meteor">Meteors</button></div>
 </div>
 
@@ -350,8 +354,8 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=4"></script>
-<script src="deep.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="stars.js?v=5"></script>
+<script src="deep.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

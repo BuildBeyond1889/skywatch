@@ -652,7 +652,7 @@
   const ZONE = { top: 150, bot: 9999 };
   function updateZones() {
     const top = $('#top'), low = $('#lower');
-    if (S.clear) { ZONE.top = 8; ZONE.bot = H - 70; return; }
+    if (S.clear) { ZONE.top = 66; const cd = $('#card'); ZONE.bot = cd.hidden ? H - 10 : cd.getBoundingClientRect().top - 6; return; }
     ZONE.top = top.hidden ? 0 : top.getBoundingClientRect().bottom + 6;
     let b = H;
     if (!low.hidden) for (const el of [$('#card'), $('#timebar')]) if (!el.hidden) { b = Math.min(b, el.getBoundingClientRect().top - 6); }
@@ -929,8 +929,10 @@
     S.counts = { up, inView };
     cands.sort((a, b) => b.score - a.score);
     // trails for the most interesting few
-    const trailSats = cands.filter(c => c.s === S.sel || SPECIAL[c.s.id]).slice(0, 4).map(c => c.s);
+    const trailSats = cands.filter(c => SPECIAL[c.s.id] && c.s !== S.sel).slice(0, 3).map(c => c.s);
+    if (S.sel && S.sel.kind === 'sat' && S.sel.ok) trailSats.unshift(S.sel);
     if (S.f.layers.trails) { updateTrails(new Date(t), trailSats); for (const s of trailSats) drawTrail(s, t); }
+    drawPassPath(t, placed);
     let n = 0;
     for (const c of cands) {
       if (n >= dens.sat && c.score < 1e3) break;
@@ -1134,6 +1136,11 @@
   function drawArrows(t, placed) {
     const targets = [];
     if (S.sel && S.sel.v) targets.push(S.sel);
+    const sel = S.sel;
+    if (S.view === 'orbit' && sel && sel.kind === 'sat' && sel.passPath && sel.next && sel.next !== 'none' && sel.v && satDir(sel, t)[2] < 0 && t < sel.next.vStart) {
+      let best = null; for (const q of sel.passPath) if (!best || Math.abs(q.t - sel.next.vStart) < Math.abs(best.t - sel.next.vStart)) best = q;
+      if (best) targets.splice(targets.indexOf(sel), 1, { kind: 'passstart', name: (SPECIAL[sel.id] || sel.name) + ' appears here', v: best.v, o: sel });
+    }
     if (S.view === 'orbit') {
       for (const s of Sats.prio) if (s.ok && s !== S.sel) targets.push(s);
       for (const id of S.pinned) { const s = Sats.byId.get(id); if (s && s.ok && s !== S.sel && !SPECIAL[id]) targets.push(s); }
@@ -1162,13 +1169,13 @@
       lx = clamp(lx, 6, W - tw - 6); ly = clamp(ly, ZONE.top + 4, Math.max(ZONE.top + 4, ZONE.bot - 34));
       const box = { x: lx - 6, y: ly - 4, w: tw + 12, h: 30 };
       const clash = (placed || []).some(q => box.x < q.x + q.w && box.x + box.w > q.x && box.y < q.y + q.h && box.y + box.h > q.y);
-      if (clash) { hits.push({ x, y, r: 30, o: o.kind === 'radiant' ? { kind: 'shower', ...o.o } : o, pr: 9 }); if (++used >= 4) break; continue; }
+      if (clash) { hits.push({ x, y, r: 30, o: o.kind === 'radiant' ? { kind: 'shower', ...o.o } : o.kind === 'passstart' ? o.o : o, pr: 9 }); if (++used >= 4) break; continue; }
       if (placed) placed.push(box);
       g.fillStyle = C('#050a1a', 0.7); roundRect(lx - 6, ly - 4, tw + 12, 30, 6); g.fill();
       g.fillStyle = C('#e6f6ff'); g.textBaseline = 'top'; g.fillText(nm.toUpperCase(), lx, ly);
       g.font = MONO; g.fillStyle = C('#93a9cc'); g.fillText(cardinal(az) + ' · ' + Math.round(altOf(v)) + '° UP', lx, ly + 13);
       g.textBaseline = 'alphabetic';
-      hits.push({ x, y, r: 30, o: o.kind === 'radiant' ? { kind: 'shower', ...o.o } : o, pr: 9 });
+      hits.push({ x, y, r: 30, o: o.kind === 'radiant' ? { kind: 'shower', ...o.o } : o.kind === 'passstart' ? o.o : o, pr: 9 });
       if (++used >= 4) break;
     }
   }
@@ -1210,6 +1217,9 @@
     else if (ST.last && Date.now() - ST.last < 20000) { txt.textContent = 'Star lock'; acc.textContent = '±' + Math.max(0.1, ST.rms).toFixed(1) + '°'; dot.classList.add('pulse'); }
     else if (S.alignedAt && Date.now() - S.alignedAt < 6 * 3600e3) { txt.textContent = 'Aligned'; acc.textContent = '±0.5°'; dot.classList.add('pulse'); }
     else { txt.textContent = 'Compass'; acc.textContent = S.compassAcc != null ? '±' + Math.round(S.compassAcc) + '°' : '±10°'; dot.classList.add('warn'); }
+    const nl = $('#notLive');
+    if (S.offset === 0) nl.hidden = true;
+    else { const m = Math.round(S.offset / 60000); nl.hidden = false; $('#notLiveText').textContent = 'NOT LIVE · ' + tfmt(now).toUpperCase() + ' (' + (Math.abs(m) >= 60 ? (Math.abs(m) / 60).toFixed(1).replace('.0', '') + ' H' : Math.abs(m) + ' MIN') + (m < 0 ? ' AGO' : ' AHEAD') + ')'; }
     const lb = $('#liveBtn');
     if (S.offset === 0) { lb.classList.remove('off'); $('#liveText').textContent = 'LIVE ' + now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }); }
     else { lb.classList.add('off'); const m = Math.round(S.offset / 60000); $('#liveText').textContent = (m > 0 ? '+' : '−') + Math.abs(m) + ' MIN · ' + tfmt(now) + ' · TAP FOR LIVE'; }
@@ -1245,7 +1255,49 @@
   }
   async function nextPassFor(s) {
     const res = await findPasses(s, simNow(), 48, { visibleOnly: true, max: 1 });
-    if (S.sel === s) { s.next = res[0] || 'none'; cardFor = null; updateCard(simNow(), true); }
+    if (S.sel === s) {
+      s.next = res[0] || 'none'; cardFor = null;
+      s.passPath = null;
+      if (s.next !== 'none') {
+        const pts = [];
+        for (let tt = s.next.start - 60e3; tt <= s.next.end + 60e3; tt += 10e3) { const st = satState(s, epochCtx(new Date(tt))); if (st) pts.push({ t: tt, v: [st.E, st.N, st.U], lit: st.lit }); }
+        s.passPath = pts;
+        // in sky view, swing round to where the pass will be if it is below the horizon now
+        const cur = s.v ? satDir(s, simNow().getTime()) : null;
+        if (S.mode === 'sky' && cur && cur[2] < 0 && pts.length) {
+          let hi = pts[0]; for (const q of pts) if (Math.abs(q.t - s.next.maxT) < Math.abs(hi.t - s.next.maxT)) hi = q;
+          S.viewAz = azOf(hi.v); S.viewAlt = clamp(altOf(hi.v) - 8, 5, 80);
+        }
+      }
+      updateCard(simNow(), true);
+    }
+  }
+  // The selected satellite's next visible pass, drawn across the sky with times, so you know where to look.
+  function drawPassPath(t, placed) {
+    const s = S.sel;
+    if (!s || s.kind !== 'sat' || !s.passPath || !s.next || s.next === 'none' || t > s.next.end) return;
+    const gcol = (GBY.get(s.prim) || GROUPS[0]).col;
+    g.lineWidth = 2; let prev = null;
+    for (const q of s.passPath) {
+      if (q.v[2] < 0) { prev = null; continue; }
+      const p = project(q.v);
+      if (!p.ok) { prev = null; continue; }
+      if (prev) { g.setLineDash(q.lit ? [6, 5] : [2, 6]); g.strokeStyle = C(gcol, q.lit ? 0.75 : 0.35); g.beginPath(); g.moveTo(prev.x, prev.y); g.lineTo(p.x, p.y); g.stroke(); }
+      prev = p;
+    }
+    g.setLineDash([]);
+    const mark = (tm, title) => {
+      let best = null; for (const q of s.passPath) if (!best || Math.abs(q.t - tm) < Math.abs(best.t - tm)) best = q;
+      if (!best) return;
+      const p = project(best.v); if (!onScreen(p, 0)) return;
+      g.fillStyle = C(gcol); g.beginPath(); g.arc(p.x, p.y, 4, 0, 6.283); g.fill();
+      const dd = new Date(tm), day = dd.toDateString() === new Date().toDateString() ? '' : dd.toLocaleDateString([], { weekday: 'short' }).toUpperCase() + ' ';
+      label(placed, p.x, p.y, 6, title, day + tfmt(dd).toUpperCase() + ' · ' + Math.round(altOf(best.v)) + '° UP', C('#ffffff'), C('#a9d9f0'), 6, true);
+    };
+    const nm = SPECIAL[s.id] || prettyName(s.name);
+    if (t < s.next.vStart) mark(s.next.vStart, nm + ' appears');
+    mark(s.next.maxT, 'Highest');
+    mark(s.next.vEnd, 'Fades');
   }
   function stat(k, v, u) { return `<div><span>${k}</span><span class="mono">${v}${u ? `<small> ${u}</small>` : ''}</span></div>`; }
   function updateCard(now, force) {
@@ -1654,6 +1706,7 @@
   $('#scrub').addEventListener('input', e => { S.scrubbing = true; setOffset(parseInt(e.target.value, 10) * 60000); });
   $('#scrub').addEventListener('change', () => { S.scrubbing = false; });
   $('#liveBtn').addEventListener('click', () => setOffset(0));
+  $('#notLive').addEventListener('click', () => { setOffset(0); toast('Back to live.'); });
 
   // ---------- chips & filters ----------
   function renderChips() {
@@ -2010,7 +2063,7 @@
   // clear view: only the sky and its labels
   function setClear(on) {
     S.clear = on; document.body.classList.toggle('clear', on); $('#clearBar').hidden = !on;
-    if (on) { select(null); $('#feedBtn').hidden = S.mode !== 'ar'; $('#feedBtn').textContent = S.noFeed ? 'Camera on' : 'Camera off'; }
+    if (on) { $('#feedBtn').hidden = S.mode !== 'ar'; $('#feedBtn').textContent = S.noFeed ? 'Camera on' : 'Camera off'; }
     zoneAt = 0;
   }
   $('#clearBtn').onclick = () => setClear(true);
