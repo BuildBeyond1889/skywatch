@@ -13,19 +13,25 @@
     ZONE.bot = b;
   }
   const FONT = '600 11px Inter, system-ui, sans-serif', MONO = '500 9px "JetBrains Mono", ui-monospace, monospace';
+  // Battery: full speed only while the view is moving; otherwise 30 fps (15 fps with Battery saver).
+  const saverOn = () => !!(S.f.saver || S.autoSaver);
   function frame() {
     requestAnimationFrame(frame);
-    const nowP = performance.now(), dt = clamp((nowP - lastFrame) / 1000, 0, 0.1); lastFrame = nowP; tick++;
+    const t0 = performance.now();
+    const moving = S.dragging || ptrs.size > 0 || S.angVel > 1.5 || Math.abs(S.rate) > 1.5 || S.scrubbing || Math.hypot(S.dragYaw, S.dragPitch) > 0.05;
+    const gap = saverOn() ? (moving ? 33 : 66) : (moving ? 0 : 33);
+    if (t0 - lastFrame < gap - 3) return;
+    const nowP = t0, dt = clamp((nowP - lastFrame) / 1000, 0, 0.1); lastFrame = nowP; tick++;
     S.ft = (S.ft || 16) * 0.95 + 0.05 * dt * 1000;
     if (S.rate !== 1) S.offset += (S.rate - 1) * dt * 1000;
-    if (S.ft > 26 && nowP - (S.perfAt || 0) > 2500 && S.dprCap > 1) { S.dprCap = Math.max(1, S.dprCap - 0.5); S.perfAt = nowP; resize(); }
+    if ((S.work || 0) > 18 && nowP - (S.perfAt || 0) > 2500 && S.dprCap > 1) { S.dprCap = Math.max(1, S.dprCap - 0.5); S.perfAt = nowP; resize(); }
     if (!S.obs) return;
     const now = simNow(), tms = now.getTime();
     try {
       if (S.mode === 'ar' && S.started && !S.gotOrient && nowP - S.arStart > 4000 && !S.noSensorWarned) {
         S.noSensorWarned = true;
         toast('No motion sensors found. Drag to look around instead.', 4000);
-        S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera(); updateModeBtn();
+        S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera(); updateModeBtn(); releaseAwake();
         toast('Tap Camera at the top to try camera view again.', 4000);
       }
       if (!S.dragging && (S.dragYaw || S.dragPitch)) {
@@ -41,10 +47,11 @@
       if (tms - S.starsAt > 1000 || Math.abs(tms - S.starsAt) > 5000 || Math.abs(S.rate) > 1.5) { updateStars(now); S.starsAt = tms; }
       if (Math.abs(tms - S.planetsAt) > 5000) { updatePlanets(now); S.planetsAt = tms; }
       if (nowP - zoneAt > 1000) { zoneAt = nowP; updateZones(); }
-      updateSats(now, S.scrubbing ? 10 : S.ft > 22 ? 3 : 6);
+      updateSats(now, S.scrubbing ? 10 : saverOn() || (S.work || 0) > 14 ? 3 : 6);
       draw(now);
       starTrack(nowP);
       meteorWatch(nowP);
+      S.work = (S.work || 8) * 0.9 + 0.1 * (performance.now() - t0);
       if (nowP - cardAt > 250) {
         autoRed(); cardAt = nowP; updateHUD(now); updateCard(now); checkAlarms(); }
     } catch (e) {

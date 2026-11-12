@@ -49,6 +49,7 @@
     else { b.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" style="stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px;margin-right:6px"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Camera'; b.setAttribute('aria-label', 'Switch to camera view'); }
   }
   function startSkyMode() {
+    releaseAwake();
     S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera();
     const first = !S.started;
     showHUD(); updateModeBtn(); if (first) requestGPS();

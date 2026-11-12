@@ -392,6 +392,7 @@
       <div class="seg" id="clockSeg"><button type="button" data-v="12" aria-pressed="${!PREF.h24}">12-hour clock</button><button type="button" data-v="24" aria-pressed="${PREF.h24}">24-hour clock</button></div>
       <div class="li"><div class="grow"><span class="t">Red mode after dark</span><span class="s">Switches red night mode on by itself in camera view once it is properly dark</span></div><button type="button" class="switch" role="switch" id="autoRedSw" aria-checked="${!!S.f.autoRed}"><span></span></button></div>
       <button type="button" class="btn small" id="tipsAgain" style="align-self:flex-start">Show the tips again</button>
+      <div class="li"><div class="grow"><span class="t">Battery saver</span><span class="s">Slower redraws when you hold still, lower camera resolution, less frequent star lock. Turns on by itself under 20%.</span></div><button type="button" class="switch" role="switch" id="saverSw" aria-checked="${!!S.f.saver}"><span></span></button></div>
       <div class="sec-label">Location</div>
       <p class="muted" style="margin:0">${S.locSource === 'gps' ? 'Using your GPS location' : S.locSource === 'manual' ? 'Set by hand' : 'Approximate, based on your time zone'}: <span class="mono">${o.lat.toFixed(3)}°, ${o.lon.toFixed(3)}°</span></p>
       <div class="inline"><input id="latIn" inputmode="decimal" aria-label="Latitude" placeholder="Latitude" value="${o.lat.toFixed(3)}"><input id="lonIn" inputmode="decimal" aria-label="Longitude" placeholder="Longitude" value="${o.lon.toFixed(3)}"></div>
@@ -425,6 +426,7 @@
     $('#autoStarSw').onclick = () => { S.f.autoStar = !S.f.autoStar; saveFilters(); buildSettings(); };
     $$('#unitSeg button').forEach(b => b.onclick = () => { PREF.miles = b.dataset.v === 'mi'; savePref(); tonightDirty = true; buildSettings(); });
     $$('#clockSeg button').forEach(b => b.onclick = () => { PREF.h24 = b.dataset.v === '24'; savePref(); tonightDirty = true; buildSettings(); });
+    $('#saverSw').onclick = () => { S.f.saver = !S.f.saver; saveFilters(); buildSettings(); toast(S.f.saver ? 'Battery saver on.' + (S.mode === 'ar' ? ' Tap Camera later to apply the lower camera resolution.' : '') : 'Battery saver off.'); };
     $('#autoRedSw').onclick = () => { S.f.autoRed = !S.f.autoRed; saveFilters(); buildSettings(); };
     $('#tipsAgain').onclick = () => { closeSheets(); showTips(0); };
     $('#diagBtn').onclick = runDiagnostics;
@@ -441,7 +443,7 @@
     const row = (k, ok, v) => rows.push(`<div class="kv"><span>${ok === true ? '✓' : ok === false ? '✗' : '•'} ${esc(k)}</span><span>${esc(v)}</span></div>`);
     const render = () => { out.innerHTML = rows.join(''); };
     out.innerHTML = '<p class="muted">Checking…</p>';
-    row('App version', null, 'v10 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
+    row('App version', null, 'v11 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
     row('Orbit math library', S.libs.sat, S.libs.sat ? 'loaded' : 'missing');
     row('Planet library', S.libs.astro, S.libs.astro ? 'loaded' : 'missing');
     for (const gr of GROUPS) if (Sats.status[gr.id] != null) row('CelesTrak · ' + gr.name, typeof Sats.status[gr.id] === 'number', typeof Sats.status[gr.id] === 'number' ? fmt(Sats.status[gr.id]) + ' · ' + ((Date.now() - (Sats.age[gr.id] || Date.now())) / 3600e3).toFixed(1) + ' h old' : String(Sats.status[gr.id]));
@@ -454,7 +456,9 @@
       row('Star / Sun / Moon lock', ST.last ? Date.now() - ST.last < 60000 : null, ST.last ? (ST.src || 'Star') + ' · ' + Math.round((Date.now() - ST.last) / 1000) + ' s ago' : 'not yet' + (ST.seen != null ? ' · ' + ST.seen + ' lights seen' : ''));
     }
     row('Compass correction', null, S.hcorr.toFixed(1) + '°');
-    row('Frame time', S.ft < 25, Math.round(S.ft || 0) + ' ms · resolution ×' + DPR);
+    row('Drawing work', (S.work || 0) < 14, Math.round(S.work || 0) + ' ms per frame · resolution ×' + DPR);
+    row('Battery saver', null, saverOn() ? (S.autoSaver ? 'on (low battery)' : 'on') : 'off');
+    if (S.battery) row('Battery', S.battery.level > 0.2 || S.battery.charging, Math.round(S.battery.level * 100) + '%' + (S.battery.charging ? ' · charging' : ''));
     row('Vibration', 'vibrate' in navigator, 'vibrate' in navigator ? 'supported' : 'not on this phone');
     render();
     const probe = async (name, url) => { const t0 = performance.now(); try { const r = await fetch(url, { cache: 'no-store' }); row(name, r.ok, r.ok ? 'reachable · ' + Math.round(performance.now() - t0) + ' ms' : 'HTTP ' + r.status); } catch (e) { row(name, false, 'blocked or offline'); } render(); };

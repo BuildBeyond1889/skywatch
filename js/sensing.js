@@ -19,7 +19,7 @@
   }
   const unproject = (x, y) => mv(VM, [(x - W / 2) / FOC, -(y - H / 2) / FOC, -1]);
   function starTrack(nowP) {
-    if (S.mode !== 'ar' || !S.f.autoStar || !cam.videoWidth || !S.q || nowP - ST.at < 1500) return;
+    if (S.mode !== 'ar' || !S.f.autoStar || !cam.videoWidth || !S.q || nowP - ST.at < (saverOn() ? 4000 : 1500)) return;
     ST.at = nowP;
     if (S.angVel > 4 || S.dragging || Math.hypot(S.dragYaw, S.dragPitch) > 0.5 || S.align) return;
     const fwd = unproject(W / 2, H / 2); if (altOf(fwd) > 70 || altOf(fwd) < 3) return;
@@ -221,14 +221,35 @@
   let stream = null;
   async function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('This browser has no camera access here. Open the app over https.');
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: saverOn() ? 960 : 1280 }, height: { ideal: saverOn() ? 540 : 720 } }, audio: false });
     cam.srcObject = stream; cam.hidden = false;
     try { await cam.play(); } catch (e) { /* autoplay will start it */ }
   }
   function stopCamera() { if (stream) { stream.getTracks().forEach(tr => tr.stop()); stream = null; } }
   let wake = null;
-  async function keepAwake() { try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* not allowed */ } }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.started) keepAwake(); });
+  // Keep the screen on only in camera view; sky view lets the phone sleep normally.
+  async function keepAwake() { try { if (S.mode === 'ar' && 'wakeLock' in navigator && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch (e) { /* not allowed */ } }
+  function releaseAwake() { try { if (wake) wake.release(); } catch (e) { /* ignore */ } wake = null; }
+  // Stop the camera when the app is in the background and bring it back on return.
+  let camPaused = false;
+  document.addEventListener('visibilitychange', async () => {
+    if (!S.started) return;
+    if (document.visibilityState === 'hidden') { if (S.mode === 'ar' && stream) { stopCamera(); camPaused = true; } }
+    else {
+      keepAwake();
+      if (camPaused && S.mode === 'ar') { camPaused = false; try { await startCamera(); } catch (e) { toast('Camera did not come back. Tap Camera to restart it.'); } }
+    }
+  });
+  // Turn Battery saver on by itself below 20% when not charging.
+  if (navigator.getBattery) navigator.getBattery().then(b => {
+    const check = () => {
+      const low = b.level <= 0.2 && !b.charging;
+      if (low && !S.autoSaver && !S.f.saver) { S.autoSaver = true; toast('Battery under 20%, so Battery saver is on.', 4000); }
+      if (!low && S.autoSaver) S.autoSaver = false;
+      S.battery = { level: b.level, charging: b.charging };
+    };
+    check(); b.addEventListener('levelchange', check); b.addEventListener('chargingchange', check);
+  }).catch(() => {});
 
   // ---------- location ----------
   function approxLocation() {
