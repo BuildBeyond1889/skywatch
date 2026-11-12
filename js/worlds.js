@@ -446,7 +446,7 @@ WORLDS.infra = (() => {
         const freq = band === 'FM' ? (p.frequency ? ' ' + parseFloat(p.frequency) : '') : band === 'AM' ? (p.frequency ? ' ' + parseFloat(p.frequency) + ' kHz' : '') : (p.channel ? ' ch ' + p.channel : '');
         addFcc(c[0], c[1], 'Broadcast tower', (p.callsign || band) + freq, titleCase(p.licensee || ''), +p.haat > 0 ? Math.min(+p.haat, 600) : 0, 'FCC');
         const f0 = parseFloat(band === 'TV' ? p.channel : p.frequency);
-        if (p.callsign && !st.stations.some(x => x.call === p.callsign && x.band === band)) st.stations.push({ call: p.callsign, band, freq: isFinite(f0) ? f0 : 0, city: titleCase(p.city || ''), op: titleCase(p.licensee || ''), service: p.service || '', lat: c[0], lon: c[1], dist: gcKm(S.obs.lat, S.obs.lon, c[0], c[1]) });
+        if (p.callsign && !st.stations.some(x => x.call === p.callsign && x.band === band)) st.stations.push({ call: p.callsign, band, freq: isFinite(f0) ? f0 : 0, state: p.state || '', city: titleCase(p.city || ''), op: titleCase(p.licensee || ''), service: p.service || '', lat: c[0], lon: c[1], dist: gcKm(S.obs.lat, S.obs.lon, c[0], c[1]) });
       }
       done();
     });
@@ -454,20 +454,31 @@ WORLDS.infra = (() => {
   const carrier = t => /cellco|verizon/i.test(t) ? 'Verizon' : /cingular|at&t|at & t/i.test(t) ? 'AT&T' : /t-mobile|sprint|omnipoint|voicestream/i.test(t) ? 'T-Mobile' : /dish|boost/i.test(t) ? 'Boost/Dish' : /us cellular|united states cellular/i.test(t) ? 'UScellular' : titleCase(t);
   // Find a station in radio-browser.info, the directory Lu Cube's radio search uses, so we can hand over the exact name to search.
   const RBH = ['de1.api.radio-browser.info', 'de2.api.radio-browser.info', 'fi1.api.radio-browser.info', 'nl1.api.radio-browser.info'];
-  async function rbLookup(sn) {
-    const base = sn.call.split('-')[0].toUpperCase(), key = 'rb2:' + sn.call;
-    const c = ls.get(key, null); if (c && Date.now() - c.t < 30 * 864e5) return c.r;
-    let r = null;
+  const USST = { AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming', PR: 'Puerto Rico' };
+  // Streams Lu Cube can play: it keeps only MP3/AAC, not HLS, so a copied name always finds a station there.
+  const playable = x => { const u = (x.url_resolved || x.url || '').trim(), c = (x.codec || '').toUpperCase(); return /^https?:\/\//.test(u) && !(x.hls == 1 || x.hls === true) && ['MP3', 'AAC', 'AAC+'].includes(c) && (x.name || '').trim(); };
+  async function rbGet(q) {
     for (const h of RBH) {
-      try {
-        const res = await fetch(`https://${h}/json/stations/search?name=${encodeURIComponent(base)}&countrycode=US&hidebroken=true&order=clickcount&reverse=true&limit=30`);
-        if (!res.ok) continue;
-        // keep only streams Lu Cube can play (it drops HLS and anything that isn't MP3/AAC), so a copied name always finds a station there
-        const list = (await res.json()).filter(x => { const u = (x.url_resolved || x.url || '').trim(), c = (x.codec || '').toUpperCase(); return /^https?:\/\//.test(u) && !(x.hls == 1 || x.hls === true) && ['MP3', 'AAC', 'AAC+'].includes(c) && (x.name || '').trim(); }), word = new RegExp('(^|[^A-Z])' + base + '([^A-Z]|$)');
-        const hit = list.find(x => word.test((x.name || '').toUpperCase()) && (!sn.freq || sn.band !== 'FM' || !/\d{2,3}\.\d/.test(x.name) || (x.name || '').includes(String(sn.freq)))) || list.find(x => word.test((x.name || '').toUpperCase()));
-        r = hit ? { name: hit.name.replace(/\s+/g, ' ').trim().slice(0, 60), state: hit.state || '' } : false; break;
-      } catch (e) { /* try the next server */ }
+      try { const res = await fetch(`https://${h}/json/stations/search?${new URLSearchParams(Object.assign({ countrycode: 'US', hidebroken: 'true', order: 'clickcount', reverse: 'true' }, q))}`); if (res.ok) return await res.json(); } catch (e) { /* next server */ }
     }
+    return null;
+  }
+  async function rbLookup(sn) {
+    const base = sn.call.split(/[-\s]/)[0].toUpperCase(), key = 'rb3:' + sn.call;
+    const c = ls.get(key, null); if (c && Date.now() - c.t < 30 * 864e5) return c.r;
+    const word = new RegExp('(^|[^A-Z])' + base + '([^A-Z]|$)'), fq = String(sn.freq || ''), stName = USST[(sn.state || '').toUpperCase()] || '';
+    const nearTower = x => { const la = parseFloat(x.geo_lat), lo = parseFloat(x.geo_long); return isFinite(la) && isFinite(lo) && (la || lo) && gcKm(la, lo, sn.lat, sn.lon) < 150; };
+    const hasFreq = x => fq && new RegExp('(^|[^0-9.])' + fq.replace('.', '\\.') + '([^0-9]|$)').test(x.name || '');
+    let ok = false, hit = null;
+    // 1. the call sign in the station's name (WNYC 93.9 FM) or its website (wnyc.org)
+    const a = await rbGet({ name: base, limit: '30' });
+    if (a) { ok = true; hit = a.filter(playable).find(x => word.test((x.name || '').toUpperCase()) && (!/\d{2,3}\.\d/.test(x.name) || sn.band !== 'FM' || hasFreq(x))) || null; }
+    // 2. the frequency in the name, from a station in the same state or near the tower (e.g. "103.5 KTU")
+    if (!hit && fq) {
+      const b = await rbGet({ name: fq, limit: '150' });
+      if (b) { ok = true; hit = b.filter(playable).find(x => hasFreq(x) && ((stName && (x.state || '').toLowerCase().includes(stName.toLowerCase())) || nearTower(x) || (x.homepage || '').toLowerCase().includes(base.toLowerCase()))) || null; }
+    }
+    const r = hit ? { name: hit.name.replace(/\s+/g, ' ').trim().slice(0, 60), state: hit.state || '' } : ok ? false : null;
     if (r !== null) ls.set(key, { t: Date.now(), r });
     return r;
   }
@@ -628,6 +639,7 @@ WORLDS.infra = (() => {
         ${st.stations.length ? `<details id="radioDial"${st.dialOpen ? ' open' : ''}><summary class="mono" style="cursor:pointer;font-size:11px;letter-spacing:.06em">RADIO DIAL · ${st.stations.filter(x => x.band !== 'TV').length} STATIONS · ${st.stations.filter(x => x.band === 'TV').length} TV</summary>
           <div class="seg" id="dialSeg">${['FM', 'AM', 'TV'].map(b => `<button type="button" data-b="${b}" aria-pressed="${st.dial === b}">${b}</button>`).join('')}</div>
           <div class="srch" style="max-height:220px;overflow:auto">${st.stations.filter(x => x.band === st.dial).sort((a, b) => a.freq - b.freq).map(sn => `<button type="button" class="srch-row" data-sn="${st.stations.indexOf(sn)}"><span><b>${st.dial === 'TV' ? 'CH ' + sn.freq : sn.freq + (st.dial === 'AM' ? ' kHz' : '')}</b> ${esc(sn.call)}${sn.city ? ' · ' + esc(sn.city) : ''}</span><span>${kmTxt(sn.dist)} ${cardinal(bearingTo(S.obs.lat, S.obs.lon, sn.lat, sn.lon))}</span></button>`).join('') || '<p class="muted" style="margin:0">None found nearby.</p>'}</div></details>` : ''}
+        ${st.cubeTotal ? `<div class="muted mono" style="font-size:10px">LU CUBE CHECK · ${st.cubeDone}/${st.cubeTotal} STATIONS · ${st.stations.filter(x => x.rb && x.rb.name).length} PLAYABLE · ${st.stations.filter(x => x.rb === null).length} COULDN’T CHECK</div>` : ''}
         <div class="muted mono" style="font-size:10px">${[['fccCell', 'FCC CELL SITES'], ['fccBroadcast', 'FCC FM/AM/TV'], ['near', 'OSM MASTS'], ['power', 'OSM POWER']].map(([k, n]) => n + ' ' + (s[k] === 'ok' ? '✓' : s[k] === 'error' ? '✕' : '…')).join(' · ')}</div>
         ${bad ? '<div class="card-actions"><button type="button" class="btn small" id="infraRetry">Some sources failed. Try again</button></div>' : ''}
         <span class="muted" style="font-size:11px">Towers: FCC licence data via HIFLD, plus OpenStreetMap. Power: © OpenStreetMap contributors.</span>`;
