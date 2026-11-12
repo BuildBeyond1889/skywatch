@@ -305,6 +305,67 @@ async function savePhoto() {
   toast('Labelled photo saved. It’s in Your sky → Snapshots.');
 }
 
+// ===================== Jump anywhere =====================
+const PLACES = [
+  ['Point Nemo', 'Farthest point from any land', -48.8767, -123.3933], ['Middle of the Sahara', 'Algeria–Niger border, no lights for 500 km', 21.5, 8.5],
+  ['South Pole', 'Amundsen–Scott Station', -89.99, 0], ['North Pole', 'The top of the world', 89.99, 0],
+  ['Mount Everest', 'Summit, 8,849 m', 27.9881, 86.925], ['Atacama Desert', 'Darkest, driest skies (ALMA)', -23.03, -67.75],
+  ['Cape Canaveral', 'Launch pads 39A and 40', 28.573, -80.649], ['Baikonur', 'Where Soyuz launches', 45.92, 63.34],
+  ['Mauna Kea', 'Observatories above the clouds', 19.8207, -155.4681], ['Tokyo', 'Shibuya Crossing', 35.6595, 139.7005],
+  ['Svalbard', 'Aurora under polar night', 78.2232, 15.6267], ['Middle of the Pacific', 'Halfway between Hawaii and Japan', 30, -170]
+];
+function jumpTo(lat, lon, name) {
+  if (!S.travel && S.obs) S.home = S.home || [S.obs.lat, S.obs.lon, S.locSource];
+  S.travel = { name, lat, lon };
+  setLocation(lat, lon, 'jump'); closeSheets();
+  if (S.mode === 'sky') { S.viewAlt = 45; S.zoom = 1; }
+  $('#travelPill').hidden = false; updateTravel();
+  toast('You’re at ' + name + '. The sky, satellites and radio are live for this spot.' + (S.mode === 'ar' ? ' Your phone is now a window onto its sky.' : ''), 4500);
+}
+function updateTravel() {
+  if (!S.travel) return;
+  const off = Math.round(S.travel.lon / 15), d = new Date(Date.now() + S.offset + off * 3600e3);
+  const hh = d.getUTCHours(), mm = String(d.getUTCMinutes()).padStart(2, '0'), sun = SUN.v ? altOf(SUN.v) : 0;
+  $('#travelTxt').textContent = '📍 ' + S.travel.name.toUpperCase() + ' · ~' + ((hh + 11) % 12 + 1) + ':' + mm + (hh < 12 ? ' AM' : ' PM') + ' · ' + (sun > 0 ? 'DAY' : sun > -12 ? 'TWILIGHT' : 'NIGHT');
+}
+setInterval(updateTravel, 10000);
+function goHome() {
+  const h = S.home; S.travel = null; $('#travelPill').hidden = true;
+  if (h) setLocation(h[0], h[1], h[2] === 'jump' ? 'manual' : h[2]); else requestGPS();
+  toast('Back at your location.');
+}
+function issUnder() {
+  const s = Sats.byId.get(25544); if (!s || !window.satellite) return null;
+  try { const rec = s.rec || (s.rec = satellite.twoline2satrec(s.l1, s.l2)), now = simNow(), pv = satellite.propagate(rec, now); if (!pv.position) return null; const gd = satellite.eciToGeodetic(pv.position, satellite.gstime(now)); return [satellite.degreesLat(gd.latitude), satellite.degreesLong(gd.longitude)]; } catch (e) { return null; }
+}
+function buildJumpGrid() {
+  $('#jumpGrid').innerHTML = [['Under the ISS', 'Right now, as it flies over', 'iss'], ['Random spot', 'Anywhere on Earth', 'rand']].concat(PLACES).map((p, i) => `<button type="button" data-j="${i}"><b>${esc(p[0])}</b><small>${esc(p[1])}</small></button>`).join('') + (S.travel ? '<button type="button" data-j="home"><b>↩ Back home</b><small>Your own location</small></button>' : '');
+  const all = [['Under the ISS', '', 'iss'], ['Random spot', '', 'rand']].concat(PLACES);
+  $$('#jumpGrid button').forEach(b => b.onclick = () => {
+    const k = b.dataset.j; if (k === 'home') { closeSheets(); goHome(); return; }
+    const p = all[+k];
+    if (p[2] === 'iss') { const ll = issUnder(); if (!ll) { toast('The ISS isn’t loaded yet.'); return; } jumpTo(ll[0], ll[1], 'Under the ISS'); S.viewAlt = 85; return; }
+    if (p[2] === 'rand') { const la = Math.asin(Math.random() * 2 - 1) * R2D, lo = Math.random() * 360 - 180; jumpTo(la, lo, la.toFixed(1) + '°, ' + lo.toFixed(1) + '°'); return; }
+    jumpTo(p[2], p[3], p[0]);
+  });
+}
+$('#worldPill').addEventListener('click', () => setTimeout(buildJumpGrid, 50));
+buildJumpGrid();
+$('#jumpForm').onsubmit = async e => {
+  e.preventDefault(); const q = $('#jumpQ').value.trim(); if (!q) return;
+  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) { jumpTo(+m[1], +m[2], (+m[1]).toFixed(2) + '°, ' + (+m[2]).toFixed(2) + '°'); return; }
+  $('#jumpRes').innerHTML = '<p class="muted" style="margin:6px 0">Searching…</p>';
+  try {
+    const j = await (await fetch('https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&name=' + encodeURIComponent(q))).json();
+    const R = (j && j.results) || [];
+    $('#jumpRes').innerHTML = R.length ? R.map((r, i) => `<button type="button" class="srch-row" data-r="${i}"><span>${esc(r.name)}</span><span>${esc([r.admin1, r.country].filter(Boolean).join(', ').toUpperCase())}</span></button>`).join('') : '<p class="muted" style="margin:6px 0">Nothing found. Try another spelling, or type latitude, longitude.</p>';
+    $$('#jumpRes [data-r]').forEach(b => b.onclick = () => { const r = R[+b.dataset.r]; $('#jumpRes').innerHTML = ''; $('#jumpQ').value = ''; jumpTo(r.latitude, r.longitude, r.name); });
+  } catch (er) { $('#jumpRes').innerHTML = '<p class="muted" style="margin:6px 0">Search needs the internet.</p>'; }
+};
+$('#travelHome').onclick = goHome;
+$('#travelRadio').onclick = () => { WSTATE.chip.infra = 'cube'; ls.set('wchips', WSTATE.chip); setWorld('infra'); };
+
 // ===================== Wiring =====================
 $('#recBtn').onclick = () => setTimeout(startRecording, 300);
 $('#recStop').onclick = stopRecording;

@@ -145,7 +145,7 @@
       for (const [a, b] of S.sel.lines) { if (!a.v || !b.v) continue; const pa = project(a.v), pb = project(b.v); if (pa.ok && pb.ok) { g.moveTo(pa.x, pa.y); g.lineTo(pb.x, pb.y); } }
       g.stroke();
     }
-    drawLaunches(now, placed, t);
+    if (typeof drawLaunches === 'function') drawLaunches(now, placed, t);
     drawArrows(t, placed);
     if (S.align) drawAlignTargets();
     if (S.f.showDetect && ST.pts && performance.now() - ST.ptsAt < 1600 && S.mode === 'ar') {

@@ -369,10 +369,10 @@ WORLDS.ground = (() => {
 // INVISIBLE INFRASTRUCTURE: the geostationary belt, navigation satellites, cell and broadcast towers, power lines, data centres.
 // ======================================================================
 WORLDS.infra = (() => {
-  const st = { towers: [], power: [], subs: [], dcs: [], stations: [], loadedFor: null, at: 0, status: {}, carrier: ls.get('carrier', ''), dial: 'FM' };
+  const st = { towers: [], power: [], subs: [], dcs: [], stations: [], rbNear: [], loadedFor: null, at: 0, status: {}, carrier: ls.get('carrier', ''), dial: 'FM' };
   const isCell = x => x.type === 'Cell / radio mast';
   // The tower your phone is most likely using: the nearest site of your carrier (a website can't read the real one).
-  function servingTower() { let best = null; for (const x of st.towers) { if (!isCell(x) || x.src !== 'FCC') continue; if (st.carrier && !x.ops.includes(st.carrier)) continue; if (!best || x.dist < best.dist) best = x; } return best; }
+  function servingTower() { let best = null; for (const x of st.towers) { if (!isCell(x) || x.src !== 'FCC' || x.dist > 40) continue; if (st.carrier && !x.ops.includes(st.carrier)) continue; if (!best || x.dist < best.dist) best = x; } return best; }
   const towerOf = sn => st.towers.find(x => Math.abs(x.lat - sn.lat) < 0.0008 && Math.abs(x.lon - sn.lon) < 0.001);
   const centerOf = e => e.lat != null ? [e.lat, e.lon] : e.center ? [e.center.lat, e.center.lon] : e.geometry ? [e.geometry.reduce((a, n) => a + n.lat, 0) / e.geometry.length, e.geometry.reduce((a, n) => a + n.lon, 0) / e.geometry.length] : null;
   function addTower(e, near) {
@@ -482,6 +482,36 @@ WORLDS.infra = (() => {
     if (r !== null) ls.set(key, { t: Date.now(), r });
     return r;
   }
+  function wireCopy(card) {
+    $$('[data-copy]', card).forEach(b => b.onclick = async e => {
+      e.stopPropagation(); const txt = b.dataset.copy; let ok = false;
+      try { await navigator.clipboard.writeText(txt); ok = true; } catch (er) { /* fall back below */ }
+      if (!ok) { try { const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch (er) { /* ignore */ } }
+      b.textContent = ok ? 'COPIED ✓' : 'SELECT IT'; toast(ok ? 'Copied “' + txt + '”. ' + (ANDROID ? 'Switch to Lu Cube and paste it in radio search (🔎).' : 'Paste it in Lu Cube’s radio search (🔎).') : 'Press and hold the name to copy it.');
+      try { navigator.vibrate && navigator.vibrate(12); } catch (er) { /* ignore */ }
+      if (ok && !ANDROID) setTimeout(() => window.open('https://buildbeyond1889.github.io/LuCube/app/', '_blank', 'noopener'), 450);
+    });
+  }
+  // Radio anywhere on Earth: stations in Lu Cube's directory whose studio is within 250 km (works outside the US too).
+  async function loadRbNear() {
+    const key = S.obs.lat.toFixed(1) + ',' + S.obs.lon.toFixed(1); st.rbNear = []; st.status.rbNear = 'loading'; cardFor = null;
+    try {
+      let cc = ls.get('cc:' + key, null);
+      if (cc === null) { const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${S.obs.lat}&longitude=${S.obs.lon}&localityLanguage=en`); const j = await r.json(); cc = (j && j.countryCode) || ''; ls.set('cc:' + key, cc); }
+      if (!cc) { st.status.rbNear = 'ok'; st.rbNearNote = 'No country here, so no local stations.'; cardFor = null; return; }
+      const list = await rbGet({ countrycode: cc, has_geo_info: 'true', limit: '800' });
+      if (!list) { st.status.rbNear = 'error'; cardFor = null; return; }
+      const seen = new Set();
+      st.rbNear = list.filter(playable).map(x => ({ world: 'infra', kind: 'rbst', name: x.name.replace(/\s+/g, ' ').trim().slice(0, 60), lat: parseFloat(x.geo_lat), lon: parseFloat(x.geo_long), tags: (x.tags || '').split(',').slice(0, 2).join(' · '), city: x.state || '' }))
+        .filter(x => isFinite(x.lat) && isFinite(x.lon) && (x.lat || x.lon)).map(x => Object.assign(x, { dist: gcKm(S.obs.lat, S.obs.lon, x.lat, x.lon) }))
+        .filter(x => x.dist < 1500 && !seen.has(x.name.toLowerCase()) && seen.add(x.name.toLowerCase())).sort((a, b) => a.dist - b.dist);
+      const close = st.rbNear.filter(x => x.dist < 250);
+      st.rbNear = close.length ? close.slice(0, 60) : st.rbNear.slice(0, 12);
+      st.rbNearNote = close.length ? '' : st.rbNear.length ? 'Nothing within 250 km. These are the nearest, ' + kmTxt(st.rbNear[0].dist) + ' and more away.' : 'No Lu Cube stations anywhere near here.';
+      st.status.rbNear = 'ok';
+    } catch (e) { st.status.rbNear = 'error'; }
+    cardFor = null;
+  }
   // "Cube Compatible": check every FM/AM station against Lu Cube's directory, one at a time, and mark its tower.
   const markCube = sn => { if (sn.rb && sn.rb.name) { const t = towerOf(sn); if (t) t.cube = true; } };
   async function runCubeScan() {
@@ -501,8 +531,8 @@ WORLDS.infra = (() => {
     for (const gid of ['geo', 'gnss']) if (!Sats.status[gid]) loadGroup(gid);
     const key = S.obs.lat.toFixed(2) + ',' + S.obs.lon.toFixed(2);
     if (st.loadedFor === key && !force) return; st.loadedFor = key;
-    st.towers = []; st.power = []; st.subs = []; st.dcs = []; st.stations = [];
-    loadFcc();
+    st.towers = []; st.power = []; st.subs = []; st.dcs = []; st.stations = []; st.cubeDone = undefined;
+    loadFcc(); loadRbNear();
     const L = S.obs.lat, N = S.obs.lon, tag = '["man_made"~"^(mast|tower|communications_tower)$"]';
     const bb = km => { const dl = km / 111, dn = km / (111 * Math.max(Math.cos(L * D2R), 0.2)); return [(L - dl).toFixed(3), (N - dn).toFixed(3), (L + dl).toFixed(3), (N + dn).toFixed(3)].join(','); };
     const towersDone = (j, near, which) => { st.status[which] = j ? 'ok' : 'error'; for (const e of (j && j.elements) || []) { const t = e.tags || {}; if (/data_center|exchange/.test(t.telecom || '')) { const c = centerOf(e); if (c) st.dcs.push({ world: 'infra', kind: 'dc', name: t.name || (t.telecom === 'exchange' ? 'Telephone exchange' : 'Data centre'), op: t.operator || '', lat: c[0], lon: c[1] }); } else addTower(e, near); } st.towers.sort((a, b) => a.dist - b.dist); cardFor = null; };
@@ -567,7 +597,10 @@ WORLDS.infra = (() => {
       for (const sb of st.subs) { sb.v = geoEnu(sb.lat, sb.lon, sb.plant ? 0.05 : 0.005); const p = project(sb.v); if (!onScreen(p, 4)) continue; g.strokeStyle = C(sb.plant ? '#ff6b5e' : '#ffb45a'); g.lineWidth = 1.5; g.strokeRect(p.x - 5, p.y - 5, 10, 10); if (sb.plant) { g.beginPath(); g.moveTo(p.x - 3, p.y + 2); g.lineTo(p.x, p.y - 3); g.lineTo(p.x + 3, p.y + 2); g.stroke(); } hits.push({ x: p.x, y: p.y, r: 20, o: sb, pr: 3 }); label(placed, p.x, p.y, 6, sb.name, (sb.plant ? 'POWER PLANT' + (sb.volt ? ' · ' + sb.volt.toUpperCase() : '') : 'SUBSTATION') + ' · ' + kmTxt(Math.hypot(...sb.v)), C('#fff1d6'), C(sb.plant ? '#ff8a7a' : '#ffb45a'), 3); }
     }
     if (chip === 'all' || chip === 'towers' || chip === 'cube') {
-      const cube = chip === 'cube'; if (cube && !st.cubeBusy && st.cubeDone !== st.stations.filter(sn => sn.band !== 'TV').length) runCubeScan();
+      if (performance.now() - (st.locCheck || 0) > 2000) { st.locCheck = performance.now(); if (st.loadedFor !== S.obs.lat.toFixed(2) + ',' + S.obs.lon.toFixed(2)) load(); }
+      const cube = chip === 'cube';
+      if (cube) for (const x of st.rbNear || []) { x.v = geoEnu(x.lat, x.lon, 0.03); const p = project(x.v); if (!onScreen(p, 4)) continue; g.fillStyle = C('#ffc21a'); g.beginPath(); g.arc(p.x, p.y, 4, 0, 6.283); g.fill(); g.strokeStyle = C('#ffc21a', 0.6); g.lineWidth = 1.4; g.beginPath(); g.arc(p.x, p.y, 8, -2.4, -0.7); g.stroke(); hits.push({ x: p.x, y: p.y, r: 18, o: x, pr: 4 }); label(placed, p.x, p.y, 7, x.name, 'LU CUBE · ' + kmTxt(x.dist) + ' · STUDIO', C('#ffffff'), C('#ffc21a'), x === S.sel ? 9 : 3, x === S.sel); if (x === S.sel) drawReticle(p, t, '#ffc21a'); }
+      if (cube && !st.cubeBusy && st.cubeDone !== st.stations.filter(sn => sn.band !== 'TV').length) runCubeScan();
       st.sv = cube ? null : servingTower();
       for (const tw of st.towers) {
         if (cube && !tw.cube) continue;
@@ -609,6 +642,9 @@ WORLDS.infra = (() => {
         <div class="card-foot"><span>${geo ? `To aim a satellite dish at it, point it to compass bearing ${azOf(v).toFixed(1)}° true (${cardinal(azOf(v))}) and tilt it ${altOf(v).toFixed(1)}° up.` : 'Your phone’s GPS may be using this one right now. It takes about 12 hours to circle the Earth.'}</span></div>${aboutHTML(o)}`;
     }
     if (o.kind === 'belt') return close + `<div class="card-head"><div style="flex:1"><div class="card-title">The geostationary belt</div><div class="card-sub mono">35,786 KM ABOVE THE EQUATOR</div></div></div><div class="card-foot"><span>At exactly this height a satellite circles the Earth once a day, so it seems to hang still in your sky. That is why satellite TV dishes never move. Hundreds of TV, weather and military satellites sit along this arc.</span></div>`;
+    if (o.kind === 'rbst') return close + `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">LU CUBE STATION · ${kmTxt(o.dist)} AWAY${o.city ? ' · ' + esc(o.city.toUpperCase()) : ''}</div></div></div>
+        <div style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:10px;background:rgba(255,194,26,.1);border:1px solid rgba(255,194,26,.35)"><span style="flex:1;min-width:0"><span class="mono" style="display:block;font-size:9px;color:#ffc21a;letter-spacing:.06em">LU CUBE SEARCH</span><span style="user-select:text;-webkit-user-select:text;font-size:13px">${esc(o.name)}</span></span><button type="button" class="btn small" data-copy="${esc(o.name)}">${ANDROID ? 'COPY' : 'COPY &amp; OPEN'}</button></div>
+        <div class="card-foot"><span>${o.tags ? esc(o.tags) + '. ' : ''}The dot is where the station says its studio is, from the radio-browser.info directory; its transmitter may be elsewhere.</span></div>`;
     if (o.kind === 'tower') {
       const t = o.tags || {}, d = Math.hypot(...(o.v || [0, 0, 0]));
       const extra = ['height', 'communication:mobile_phone', 'communication:television', 'communication:radio', 'communication:microwave'].filter(k => t[k]).map(k => `<div class="kv"><span>${esc(k.replace('communication:', '').replace('_', ' '))}</span><span>${esc(t[k])}</span></div>`).join('');
@@ -637,37 +673,29 @@ WORLDS.infra = (() => {
         <div class="seg" id="carrierSeg">${['', 'Verizon', 'AT&T', 'T-Mobile'].map(c => `<button type="button" data-c="${esc(c)}" aria-pressed="${st.carrier === c}">${c || 'Any carrier'}</button>`).join('')}</div>
         ${(() => { const sv = servingTower(); return sv ? `<div class="srch"><button type="button" class="srch-row" data-tw="${st.towers.indexOf(sv)}"><span><b style="color:#5ad1ff">Your likely tower</b> · ${esc(sv.name)}</span><span>${kmTxt(sv.dist)} ${cardinal(azOf(geoEnu(sv.lat, sv.lon, sv.h / 1000)))}</span></button></div>` : ''; })()}
         <div class="srch">${rows || `<p class="muted" style="margin:0">${busy ? 'Loading map data… this can take up to a minute the first time.' : 'No broadcast towers are mapped near you.'}</p>`}</div>
+        ${(st.rbNear && st.rbNear.length) || st.rbNearNote ? `<details id="rbNearList"${st.rbOpen ? ' open' : ''}><summary class="mono" style="cursor:pointer;font-size:11px;letter-spacing:.06em">LU CUBE STATIONS NEAR HERE · ${(st.rbNear || []).length}</summary>${st.rbNearNote ? `<p class="muted" style="margin:6px 0 0">${esc(st.rbNearNote)}</p>` : ''}<div class="srch" style="max-height:240px;overflow:auto">${(st.rbNear || []).map(x => `<div class="srch-row" style="display:flex;gap:10px;align-items:center"><span style="flex:1;min-width:0"><span style="user-select:text;-webkit-user-select:text">${esc(x.name)}</span><small class="mono muted" style="display:block">${kmTxt(x.dist)} ${cardinal(bearingTo(S.obs.lat, S.obs.lon, x.lat, x.lon))}${x.tags ? ' · ' + esc(x.tags.toUpperCase()) : ''}</small></span><button type="button" class="btn small" data-copy="${esc(x.name)}">${ANDROID ? 'COPY' : 'COPY &amp; OPEN'}</button></div>`).join('')}</div></details>` : ''}
         ${st.stations.length ? `<details id="radioDial"${st.dialOpen ? ' open' : ''}><summary class="mono" style="cursor:pointer;font-size:11px;letter-spacing:.06em">RADIO DIAL · ${st.stations.filter(x => x.band !== 'TV').length} STATIONS · ${st.stations.filter(x => x.band === 'TV').length} TV</summary>
           <div class="seg" id="dialSeg">${['FM', 'AM', 'TV'].map(b => `<button type="button" data-b="${b}" aria-pressed="${st.dial === b}">${b}</button>`).join('')}</div>
           <div class="srch" style="max-height:220px;overflow:auto">${st.stations.filter(x => x.band === st.dial).sort((a, b) => a.freq - b.freq).map(sn => `<button type="button" class="srch-row" data-sn="${st.stations.indexOf(sn)}"><span><b>${st.dial === 'TV' ? 'CH ' + sn.freq : sn.freq + (st.dial === 'AM' ? ' kHz' : '')}</b> ${esc(sn.call)}${sn.city ? ' · ' + esc(sn.city) : ''}</span><span>${kmTxt(sn.dist)} ${cardinal(bearingTo(S.obs.lat, S.obs.lon, sn.lat, sn.lon))}</span></button>`).join('') || '<p class="muted" style="margin:0">None found nearby.</p>'}</div></details>` : ''}
         ${st.cubeTotal ? `<div class="muted mono" style="font-size:10px">LU CUBE CHECK · ${st.cubeDone}/${st.cubeTotal} STATIONS · ${st.stations.filter(x => x.rb && x.rb.name).length} PLAYABLE · ${st.stations.filter(x => x.rb === null).length} COULDN’T CHECK</div>` : ''}
-        <div class="muted mono" style="font-size:10px">${[['fccCell', 'FCC CELL SITES'], ['fccBroadcast', 'FCC FM/AM/TV'], ['near', 'OSM MASTS'], ['power', 'OSM POWER']].map(([k, n]) => n + ' ' + (s[k] === 'ok' ? '✓' : s[k] === 'error' ? '✕' : '…')).join(' · ')}</div>
+        <div class="muted mono" style="font-size:10px">${[['rbNear', 'LU CUBE NEARBY'], ['fccCell', 'FCC CELL SITES'], ['fccBroadcast', 'FCC FM/AM/TV'], ['near', 'OSM MASTS'], ['power', 'OSM POWER']].map(([k, n]) => n + ' ' + (s[k] === 'ok' ? '✓' : s[k] === 'error' ? '✕' : '…')).join(' · ')}</div>
         ${bad ? '<div class="card-actions"><button type="button" class="btn small" id="infraRetry">Some sources failed. Try again</button></div>' : ''}
         <span class="muted" style="font-size:11px">Towers: FCC licence data via HIFLD, plus OpenStreetMap. Power: © OpenStreetMap contributors.</span>`;
     },
     homeCompact() { const tw = st.towers.find(x => x.type !== 'Cell / radio mast'); return `<button type="button" class="mini"><b>${st.towers.length} towers</b><span class="mono">${tw ? 'NEAREST BROADCAST ' + kmTxt(tw.dist) : Object.values(st.status).includes('loading') ? 'LOADING MAP DATA…' : 'TAP FOR DETAILS'}</span></button>`; },
-    wire(card) {
-      $$('[data-copy]', card).forEach(b => b.onclick = async e => {
-        e.stopPropagation(); const txt = b.dataset.copy; let ok = false;
-        try { await navigator.clipboard.writeText(txt); ok = true; } catch (er) { /* fall back below */ }
-        if (!ok) { try { const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch (er) { /* ignore */ } }
-        b.textContent = ok ? 'COPIED ✓' : 'SELECT IT'; toast(ok ? 'Copied “' + txt + '”. ' + (ANDROID ? 'Switch to Lu Cube and paste it in radio search (🔎).' : 'Paste it in Lu Cube’s radio search (🔎).') : 'Press and hold the name to copy it.');
-        try { navigator.vibrate && navigator.vibrate(12); } catch (er) { /* ignore */ }
-        // Android won't let a web page start the Lu Cube app (it has no link entry), so there we only copy;
-        // elsewhere the web version of Lu Cube opens.
-        if (ok && !ANDROID) setTimeout(() => window.open('https://buildbeyond1889.github.io/LuCube/app/', '_blank', 'noopener'), 450);
-      });
-    },
+    wire(card) { wireCopy(card); },
     wireHome(card) {
       $$('[data-tw]', card).forEach(b => b.onclick = () => { const x = st.towers[+b.dataset.tw]; if (!x) return; x.v = geoEnu(x.lat, x.lon, x.h / 1000); select(x); if (S.mode === 'sky') { S.viewAz = azOf(x.v); S.viewAlt = 2; S.zoom = 3; } });
       const r = $('#infraRetry', card); if (r) r.onclick = () => { load(true); };
       $$('#carrierSeg button', card).forEach(b => b.onclick = e => { e.stopPropagation(); st.carrier = b.dataset.c; ls.set('carrier', st.carrier); cardFor = null; updateCard(simNow(), true); });
       $$('#dialSeg button', card).forEach(b => b.onclick = e => { e.stopPropagation(); st.dial = b.dataset.b; cardFor = null; updateCard(simNow(), true); });
       const dl = $('#radioDial', card); if (dl) dl.ontoggle = () => { st.dialOpen = dl.open; };
+      const rn = $('#rbNearList', card); if (rn) rn.ontoggle = () => { st.rbOpen = rn.open; };
+      wireCopy(card);
       $$('[data-sn]', card).forEach(b => b.onclick = () => { const sn = st.stations[+b.dataset.sn], x = sn && towerOf(sn); if (!x) return; x.v = geoEnu(x.lat, x.lon, x.h / 1000); select(x); if (S.mode === 'sky') { S.viewAz = azOf(x.v); S.viewAlt = 2; S.zoom = 3; } });
     },
     chips: [['all', 'Everything'], ['space', 'Satellites'], ['towers', 'Towers'], ['cube', 'Cube Compatible'], ['power', 'Power grid']],
-    hud: () => wchip('infra') === 'cube' ? '<b>' + st.towers.filter(x => x.cube).length + '</b> CUBE TOWERS' + (st.cubeBusy ? ' · CHECKING ' + st.cubeDone + '/' + st.cubeTotal : '') : '<b>' + st.towers.length + '</b> TOWERS · <b>' + st.power.length + '</b> LINES', below: true,
+    hud: () => wchip('infra') === 'cube' ? '<b>' + st.towers.filter(x => x.cube).length + '</b> CUBE TOWERS · <b>' + (st.rbNear || []).length + '</b> STATIONS' + (st.cubeBusy ? ' · CHECKING ' + st.cubeDone + '/' + st.cubeTotal : '') : '<b>' + st.towers.length + '</b> TOWERS · <b>' + st.power.length + '</b> LINES', below: true,
     view: { alt: 8 }
   };
 })();

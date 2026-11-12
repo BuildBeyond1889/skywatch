@@ -261,7 +261,8 @@
   function setLocation(lat, lon, src) {
     S.obs = makeObs(lat, lon, 0.05); S.locSource = src;
     try { S.decl = GEOMAG.field(lat, lon, 0, new Date()).decl; } catch (e) { S.decl = 0; }
-    if (src !== 'approx') ls.set('loc', [Math.round(lat * 100) / 100, Math.round(lon * 100) / 100]);
+    if (src !== 'jump') S.home = [lat, lon, src];
+    if (src !== 'approx' && src !== 'jump') ls.set('loc', [Math.round(lat * 100) / 100, Math.round(lon * 100) / 100]);
     S.jump++; S.starsAt = 0; S.planetsAt = 0; trailsAt = 0;
     if (S.sel && S.sel.kind === 'sat') { S.sel.next = null; nextPassFor(S.sel); }
     tonightDirty = true;
@@ -269,7 +270,7 @@
   function requestGPS() {
     return new Promise(res => {
       if (!navigator.geolocation) return res(false);
-      navigator.geolocation.getCurrentPosition(p => { setLocation(p.coords.latitude, p.coords.longitude, 'gps'); res(true); }, () => res(false), { enableHighAccuracy: false, timeout: 12000, maximumAge: 600000 });
+      navigator.geolocation.getCurrentPosition(p => { if (S.travel) { S.home = [p.coords.latitude, p.coords.longitude, 'gps']; return res(true); } setLocation(p.coords.latitude, p.coords.longitude, 'gps'); res(true); }, () => res(false), { enableHighAccuracy: false, timeout: 12000, maximumAge: 600000 });
     });
   }
 
