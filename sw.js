@@ -1,5 +1,5 @@
 /* Sky Watch service worker: app shell network-first, libraries and fonts cache-first, so the app opens offline. */
-const V = 'skywatch-v29';
+const V = 'skywatch-v30';
 const SHELL = ['./', './index.html', './js/geomag.js', './js/core.js', './js/data.js', './js/view.js', './js/render.js', './js/cards.js', './js/sensing.js', './js/ui.js', './js/worlds.js', './js/main.js', './js/places.js', './js/extras.js', './stars.js', './deep.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-180.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL).catch(() => {})).then(() => self.skipWaiting()));
@@ -14,7 +14,7 @@ self.addEventListener('fetch', e => {
   const lib = /(^|\.)(cdn\.jsdelivr\.net|unpkg\.com|fonts\.googleapis\.com|fonts\.gstatic\.com)$/.test(u.hostname);
   if (u.origin === self.location.origin) {
     e.respondWith(fetch(req, { cache: 'no-cache' }).then(r => { const c = r.clone(); caches.open(V).then(cc => cc.put(req, c)); return r; })
-      .catch(() => caches.match(req).then(r => r || caches.match('./index.html'))));
+      .catch(() => caches.match(req).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : caches.match(req, { ignoreSearch: true })))));
   } else if (lib) {
     e.respondWith(caches.match(req).then(r => r || fetch(req).then(res => { const c = res.clone(); caches.open(V).then(cc => cc.put(req, c)); return res; })));
   }
