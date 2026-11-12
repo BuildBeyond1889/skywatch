@@ -107,6 +107,16 @@ body.red #famPill { color: var(--fg); border-color: var(--line); background: var
 .cb.night { background: rgba(140,170,255,0.09); }
 .cb i { display: block; width: 100%; border-radius: 3px 3px 0 0; opacity: 0.85; }
 .cb span { position: absolute; bottom: -14px; left: 0; font: 9px var(--mono); color: var(--dim); white-space: nowrap; }
+#worldRow { display: flex; align-items: center; justify-content: center; gap: 8px; }
+#worldPill { height: 38px; font-size: 10.5px; flex: none; }
+body:not(.w-sky) #modeSeg { display: none; }
+body:not(.w-sky) #tonightBtn .badge { display: none; }
+.wtiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.wtile { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: rgba(10,15,34,0.7); text-align: left; min-width: 0; }
+.wtile svg { width: 20px; height: 20px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 2px; }
+.wtile b { font-size: 13.5px; }
+.wtile span { font-size: 11px; color: var(--dim); line-height: 1.3; }
+.wtile[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, rgba(10,15,34,0.85)); }
 #modeSeg { align-self: center; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; width: min(320px, 100%); }
 #modeSeg button { height: 32px; border: none; border-radius: 9px; background: transparent; color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 #modeSeg button[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); }
@@ -291,7 +301,9 @@ a { color: var(--accent); }
 /* Start screen */
 #start { position: fixed; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; padding: calc(var(--st) + 24px) max(24px, var(--sr)) calc(var(--sb) + 28px) max(24px, var(--sl)); background: linear-gradient(180deg, rgba(2,3,10,0) 30%, rgba(2,3,10,0.85) 62%, #02030a 100%); transition: opacity 0.5s ease; }
 #start.gone { opacity: 0; pointer-events: none; }
-#start .inner { max-width: 460px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+#start .inner { max-width: 460px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+#start { overflow-y: auto; }
+#start h1 { font-size: 38px !important; }
 #start .eyebrow { font: 600 10.5px var(--mono); letter-spacing: 2px; color: var(--accent); }
 #start h1 { margin: 0; font: 700 44px/1 var(--display); letter-spacing: -1px; }
 #start p { margin: 0; color: var(--dim); font-size: 15px; max-width: 34ch; }
@@ -321,7 +333,9 @@ a { color: var(--accent); }
   <div id="readout" class="mono"><span>AZ <b id="roAz">–</b></span><span>ALT <b id="roAlt">–</b></span><span>FOV <b id="roFov">–</b></span><span id="roCount"><b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW</span></div>
   <button type="button" id="notLive" class="pill" hidden><span class="dot warn pulse"></span><span id="notLiveText">NOT LIVE</span><span style="opacity:.75">· TAP FOR LIVE</span></button>
   <button type="button" id="famPill" class="pill" hidden><span class="dot"></span><span id="famText">FAMILY</span><span style="opacity:.75">· TAP TO CLEAR</span></button>
-  <div id="modeSeg" class="glass" role="group" aria-label="Mode"><button type="button" data-v="orbit">Orbit</button><button type="button" data-v="deep">Deep space</button><button type="button" data-v="meteor">Meteors</button></div>
+  <div id="worldRow"><button type="button" id="worldPill" class="pill glass" aria-label="Switch world"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span id="worldName">Sky</span></button>
+    <div id="modeSeg" class="glass" role="group" aria-label="Mode"><button type="button" data-v="orbit">Orbit</button><button type="button" data-v="deep">Deep space</button><button type="button" data-v="meteor">Meteors</button></div>
+  </div>
 </div>
 
 <div id="banner" class="glass" hidden><span id="bannerText"></span><div class="row" id="bannerBtns"></div></div>
@@ -371,6 +385,11 @@ a { color: var(--accent); }
   <div class="sheet-body" id="tonightBody"></div>
 </section>
 
+<section class="sheet" id="sheetWorlds" aria-label="Worlds" aria-hidden="true">
+  <div class="sheet-head"><h2>Explore</h2><button type="button" class="btn small" data-close>Done</button></div>
+  <div class="sheet-body"><div class="wtiles" id="worldSheetTiles"></div></div>
+</section>
+
 <section class="sheet" id="sheetTime" aria-label="Time machine" aria-hidden="true">
   <div class="sheet-head"><h2>Time machine</h2><button type="button" class="btn small" data-close>Done</button></div>
   <div class="sheet-body" id="timeBody"></div>
@@ -392,9 +411,10 @@ a { color: var(--accent); }
 
 <div id="start">
   <div class="inner">
-    <div class="eyebrow">LIVE ORBIT TRACKER</div>
+    <div class="eyebrow" id="startEyebrow">LIVE ORBIT TRACKER</div>
     <h1>Sky Watch</h1>
     <p>Point your phone at the sky to see every satellite, star and planet above you, live, even through clouds or in daylight.</p>
+    <div id="worldTiles" class="wtiles" role="group" aria-label="Choose what to explore"></div>
     <button type="button" class="btn primary" id="startAR">Start camera view</button>
     <button type="button" class="btn" id="startSky">Explore without camera</button>
     <div class="tip">Tip: hold the phone flat for a second first. It helps the compass lock on.</div>
@@ -402,15 +422,17 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=11"></script>
-<script src="deep.js?v=11"></script>
-<script src="js/core.js?v=11"></script>
-<script src="js/data.js?v=11"></script>
-<script src="js/view.js?v=11"></script>
-<script src="js/render.js?v=11"></script>
-<script src="js/cards.js?v=11"></script>
-<script src="js/sensing.js?v=11"></script>
-<script src="js/ui.js?v=11"></script>
-<script src="js/main.js?v=11"></script>
+<script src="stars.js?v=12"></script>
+<script src="deep.js?v=12"></script>
+<script src="js/geomag.js?v=12"></script>
+<script src="js/core.js?v=12"></script>
+<script src="js/data.js?v=12"></script>
+<script src="js/view.js?v=12"></script>
+<script src="js/render.js?v=12"></script>
+<script src="js/cards.js?v=12"></script>
+<script src="js/sensing.js?v=12"></script>
+<script src="js/ui.js?v=12"></script>
+<script src="js/worlds.js?v=12"></script>
+<script src="js/main.js?v=12"></script>
 </body>
 </html>

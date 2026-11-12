@@ -10,6 +10,8 @@
     $('#roAlt').textContent = alt.toFixed(1) + '°';
     $('#roFov').textContent = Math.round(vfovDeg()) + '°';
     const rc = $('#roCount');
+    if (S.world !== 'sky') { rc.innerHTML = WORLDS[S.world].hud(now); }
+    else
     if (S.view === 'orbit' && S.preset === 'const') rc.innerHTML = '<b>' + (S.conCount || 0) + '</b> CONSTELLATIONS IN VIEW';
     else if (S.view === 'orbit') { if (!$('#roUp')) rc.innerHTML = '<b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW'; if (S.counts) { $('#roUp').textContent = fmt(S.counts.up); $('#roView').textContent = fmt(S.counts.inView); } }
     else if (S.view === 'deep') rc.innerHTML = '<b>' + (S.deepCount || 0) + '</b> DEEP-SKY IN VIEW';
@@ -65,7 +67,7 @@
     S.sel = o; cardFor = null;
     rebuildActive();
     if (o && o.kind === 'sat') { computeSat(o, epochCtx(simNow())); o.next = null; nextPassFor(o); }
-    $('#card').hidden = !o && S.view === 'orbit' && S.preset !== 'stations';
+    $('#card').hidden = !o && (S.world !== 'sky' ? !WORLDS[S.world].home : S.view === 'orbit' && S.preset !== 'stations');
     updateCard(simNow(), true);
   }
   async function nextPassFor(s) {
@@ -118,12 +120,15 @@
   function updateCard(now, force) {
     let o = S.sel; const card = $('#card');
     if (!o) {
-      if (S.view === 'orbit' && S.preset !== 'stations') return;
-      o = { kind: S.view === 'meteor' ? 'meteorhome' : S.view === 'deep' ? 'deephome' : 'stationhome' };
+      if (S.world !== 'sky') { if (!WORLDS[S.world].home) return; o = { kind: 'worldhome' }; }
+      else if (S.view === 'orbit' && S.preset !== 'stations') return;
+      else o = { kind: S.view === 'meteor' ? 'meteorhome' : S.view === 'deep' ? 'deephome' : 'stationhome' };
     }
     const t = now.getTime();
     let html = '';
-    if (o.kind === 'sat') {
+    if (o.kind === 'worldhome') html = WORLDS[S.world].home(now);
+    else if (o.world && WORLDS[o.world]) html = WORLDS[o.world].card(o, now);
+    else if (o.kind === 'sat') {
       const v = o.v ? satDir(o, t) : null, alt = v ? altOf(v) : -90, az = v ? azOf(v) : 0;
       const gr = GBY.get(o.prim) || GROUPS[0];
       const status = alt < 0 ? '<span class="tag dark">Below horizon</span>' : o.lit ? '<span class="tag lit">Sunlit</span>' : '<span class="tag dark">In shadow</span>';
@@ -227,6 +232,8 @@
     $('#cardToggle', card).onclick = flip;
     const mini = $('.mini', card); if (mini) mini.onclick = flip;
     const cc = $('#cardClose', card); if (cc) cc.onclick = () => select(null);
+    if (o.kind === 'worldhome' && WORLDS[S.world].wireHome) WORLDS[S.world].wireHome(card);
+    if (o.world && WORLDS[o.world] && WORLDS[o.world].wire) WORLDS[o.world].wire(card, o);
     const sb = $('#seenBtn', card); if (sb) sb.onclick = () => logSeen(o);
     const fb = $('#famBtn', card); if (fb) fb.onclick = () => setFamily(S.family && S.family.key === o.launch ? null : o);
     const cb = $('#calBtn', card); if (cb) cb.onclick = () => passToCalendar(o, o.next);
@@ -260,6 +267,8 @@
   }
   // Collapsed card: one line, or a sideways strip for the spacecraft list.
   function compactFor(o, now) {
+    if (o.kind === 'worldhome') return WORLDS[S.world].homeCompact ? WORLDS[S.world].homeCompact(now) : '';
+    if (o.world && WORLDS[o.world]) return WORLDS[o.world].compact(o, now);
     if (o.kind === 'stationhome') {
       const rows = stationRows(now);
       return rows.length ? `<div class="strip">${rows.map(r => `<button type="button" data-sat="${r.s.id}"><b>${esc(prettyName(r.name))}</b><span>${r.where}</span></button>`).join('')}</div>` : '<p class="muted" style="margin:0">Loading station data…</p>';

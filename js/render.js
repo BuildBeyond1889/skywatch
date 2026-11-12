@@ -47,7 +47,7 @@
       if (tms - S.starsAt > 1000 || Math.abs(tms - S.starsAt) > 5000 || Math.abs(S.rate) > 1.5) { updateStars(now); S.starsAt = tms; }
       if (Math.abs(tms - S.planetsAt) > 5000) { updatePlanets(now); S.planetsAt = tms; }
       if (nowP - zoneAt > 1000) { zoneAt = nowP; updateZones(); }
-      updateSats(now, S.scrubbing ? 10 : saverOn() || (S.work || 0) > 14 ? 3 : 6);
+      if (S.world === 'sky') updateSats(now, S.scrubbing ? 10 : saverOn() || (S.work || 0) > 14 ? 3 : 6);
       draw(now);
       starTrack(nowP);
       meteorWatch(nowP);
@@ -70,8 +70,10 @@
     if (bg) drawSkyBackground(sunAlt);
     if (bg && S.f.layers.stars && sunAlt < -8) drawMilkyWay(now);
     if (S.f.layers.grid) drawGrid(ar);
-    drawHorizon(ar && !S.noFeed);
+    const world = S.world !== 'sky' ? WORLDS[S.world] : null;
+    if (!(world && world.id === 'ground' && wchip('ground') === 'peel')) drawHorizon((ar && !S.noFeed) || (world && world.below));
     const placed = [];
+    if (world) { world.draw(now, placed, t, ar); drawArrows(t, placed); if (S.align) drawAlignTargets(); return; }
     const dens = { few: { star: 0.6, sat: 5 }, smart: { star: 1.6, sat: 12 }, all: { star: 2.7, sat: 45 } }[S.f.density] || { star: 1.6, sat: 12 };
     const starDim = ar ? 1 : clamp(1 - (sunAlt + 4) / 10, 0.25, 1);
     if (S.view === 'deep') drawDeep(placed, t);
@@ -547,7 +549,7 @@
       let best = null; for (const q of sel.passPath) if (!best || Math.abs(q.t - sel.next.vStart) < Math.abs(best.t - sel.next.vStart)) best = q;
       if (best) targets.splice(targets.indexOf(sel), 1, { kind: 'passstart', name: (SPECIAL[sel.id] || sel.name) + ' appears here', v: best.v, o: sel });
     }
-    if (S.view === 'orbit') {
+    if (S.world === 'sky' && S.view === 'orbit') {
       for (const s of Sats.prio) if (s.ok && s !== S.sel) targets.push(s);
       for (const id of S.pinned) { const s = Sats.byId.get(id); if (s && s.ok && s !== S.sel && !SPECIAL[id]) targets.push(s); }
     } else if (S.view === 'meteor' && S.featObj && S.featObj.rv) targets.push({ kind: 'radiant', name: S.featObj.name + ' radiant', v: S.featObj.rv, o: S.featObj });
@@ -555,7 +557,7 @@
     let used = 0;
     for (const o of targets) {
       const v = o.kind === 'sat' ? satDir(o, t) : o.v;
-      if (!v || altOf(v) < 0) continue;
+      if (!v || (altOf(v) < 0 && !(S.world !== 'sky' && WORLDS[S.world].below))) continue;
       const p = project(v);
       if (onScreen(p, -10)) continue;
       let dx = p.cx, dy = -p.cy;

@@ -189,7 +189,8 @@
     { id: 'weather', name: 'Weather', sub: 'NOAA, GOES, Meteosat and more', col: '#9ff0d0', std: 5.5, on: false },
     { id: 'gnss', name: 'GPS & navigation', sub: 'GPS, Galileo, GLONASS, BeiDou (high and faint)', col: '#ffd37a', std: 10, on: false },
     { id: 'cosmos-2251-debris', name: 'Debris: Cosmos 2251', sub: 'from the 2009 satellite collision', col: '#8091b8', std: 9, on: false },
-    { id: 'iridium-33-debris', name: 'Debris: Iridium 33', sub: 'the other half of that collision', col: '#8091b8', std: 9, on: false }
+    { id: 'iridium-33-debris', name: 'Debris: Iridium 33', sub: 'the other half of that collision', col: '#8091b8', std: 9, on: false },
+    { id: 'geo', name: 'Geostationary', sub: 'TV, weather and military satellites 36,000 km up', col: '#ffd37a', std: 11, on: false }
   ];
   const GBY = new Map(GROUPS.map(g => [g.id, g]));
   const SPECIAL = { 25544: 'ISS', 48274: 'Tiangong', 20580: 'Hubble' };
@@ -211,10 +212,12 @@
       layers: { stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true } }, ls.get('filters', {})),
     alarms: [], events: [], planetsAt: 0, starsAt: 0, libs: { sat: false, astro: false },
     dprCap: 2, collapse: {}, noFeed: false, clear: false, rate: 1, tmBase: 0, family: null,
+    world: ls.get('world', 'sky'), decl: 0,
     view: 'orbit', deepPreset: 'all', feat: null, featObj: null, autoCatch: false, caught: 0, angVel: 0
   };
   S.f.groups = Object.assign(Object.fromEntries(GROUPS.map(g => [g.id, g.on])), S.f.groups || {});
   S.f.layers = Object.assign({ stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true }, S.f.layers || {});
+  if (ls.get('declFix', 0) !== 1) { S.hcorr = 0; ls.set('hcorr', 0); ls.set('declFix', 1); }
   if (S.f.autoStar == null) S.f.autoStar = true;
   if (!S.f.haptics) S.f.haptics = 'visible';
   if (!S.f.catchSens) S.f.catchSens = 'med';

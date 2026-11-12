@@ -39,7 +39,7 @@
     cam.classList.toggle('nofeed', S.noFeed);
     const first = !S.started;
     showHUD(); updateModeBtn();
-    if (first) requestGPS(); else toast('Camera view is back.');
+    if (first) { requestGPS(); setWorld(S.world, true); } else toast('Camera view is back.');
   }
   $('#startAR').onclick = enterAR;
   // In sky view the pill next to the status chip turns into a "Camera" button that restarts camera view.
@@ -52,7 +52,7 @@
     releaseAwake();
     S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera();
     const first = !S.started;
-    showHUD(); updateModeBtn(); if (first) requestGPS();
+    showHUD(); updateModeBtn(); if (first) { requestGPS(); setWorld(S.world, true); }
   }
   $('#startSky').onclick = startSkyMode;
 

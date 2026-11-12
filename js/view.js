@@ -56,7 +56,7 @@
       const q0 = S.q;
       S.q = slerp(S.q, S.qT, 1 - Math.pow(1 - k, dt * 60));
       S.angVel = S.angVel * 0.85 + 0.15 * (qAngle(q0, S.q) / Math.max(dt, 1e-3));
-      M = mmul(rz(-S.hcorr), q2m(S.q));
+      M = mmul(rz(-(S.hcorr + (S.absolute ? S.decl : 0))), q2m(S.q));
       M = mmul(M, mmul(ry(-S.dragYaw), rx(S.dragPitch)));
     } else {
       const f = vecAA(S.viewAz, S.viewAlt), up = [0, 0, 1];

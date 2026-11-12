@@ -162,7 +162,7 @@
       const dx = e.clientX - gest.lx, dy = e.clientY - gest.ly; gest.lx = e.clientX; gest.ly = e.clientY;
       const k = R2D / FOC;
       if (S.mode === 'ar') { S.dragYaw = clamp(S.dragYaw - dx * k, -180, 180); S.dragPitch = clamp(S.dragPitch + dy * k, -90, 90); }
-      else { S.viewAz = wrap360(S.viewAz - dx * k); S.viewAlt = clamp(S.viewAlt + dy * k, -30, 89.5); }
+      else { S.viewAz = wrap360(S.viewAz - dx * k); S.viewAlt = clamp(S.viewAlt + dy * k, S.world !== 'sky' && WORLDS[S.world].below ? -89.5 : -30, 89.5); }
     }
   });
   const endPtr = e => {
@@ -208,7 +208,7 @@
   }
   function doAlign(o) {
     if (S.mode !== 'ar') { setAlign(false); return; }
-    const M = mmul(rz(-S.hcorr), q2m(S.q));
+    const M = mmul(rz(-(S.hcorr + (S.absolute ? S.decl : 0))), q2m(S.q));
     const fwd = [-M[2], -M[5], -M[8]];
     const delta = wrap180(azOf(o.v) - azOf(fwd));
     S.hcorr = wrap180(S.hcorr + delta);
@@ -259,6 +259,7 @@
   }
   function setLocation(lat, lon, src) {
     S.obs = makeObs(lat, lon, 0.05); S.locSource = src;
+    try { S.decl = GEOMAG.field(lat, lon, 0, new Date()).decl; } catch (e) { S.decl = 0; }
     if (src !== 'approx') ls.set('loc', [Math.round(lat * 100) / 100, Math.round(lon * 100) / 100]);
     S.jump++; S.starsAt = 0; S.planetsAt = 0; trailsAt = 0;
     if (S.sel && S.sel.kind === 'sat') { S.sel.next = null; nextPassFor(S.sel); }

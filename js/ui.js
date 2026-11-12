@@ -44,6 +44,12 @@
 
   // ---------- chips & filters ----------
   function renderChips() {
+    if (S.world !== 'sky' && WORLDS[S.world]) {
+      const wd = WORLDS[S.world], cur = wchip(S.world);
+      $('#chips').innerHTML = wd.chips.map(([id, n]) => `<button type="button" class="chip glass" data-p="${id}" aria-pressed="${cur === id}">${esc(n)}</button>`).join('');
+      $$('#chips .chip').forEach(b => b.onclick = () => { WSTATE.chip[S.world] = b.dataset.p; ls.set('wchips', WSTATE.chip); if (wd.onChip) wd.onChip(b.dataset.p); renderChips(); select(S.sel && S.sel.world === S.world ? S.sel : null); });
+      return;
+    }
     if (S.view === 'deep') {
       const c = [['all', 'Everything'], ['eye', 'Naked eye'], ['bino', 'Binoculars'], ['galaxy', 'Galaxies'], ['nebula', 'Nebulae'], ['cluster', 'Clusters']];
       $('#chips').innerHTML = c.map(([id, n]) => `<button type="button" class="chip glass" data-p="${id}" aria-pressed="${S.deepPreset === id}">${n}</button>`).join('');
@@ -443,7 +449,7 @@
     const row = (k, ok, v) => rows.push(`<div class="kv"><span>${ok === true ? '✓' : ok === false ? '✗' : '•'} ${esc(k)}</span><span>${esc(v)}</span></div>`);
     const render = () => { out.innerHTML = rows.join(''); };
     out.innerHTML = '<p class="muted">Checking…</p>';
-    row('App version', null, 'v11 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
+    row('App version', null, 'v12 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
     row('Orbit math library', S.libs.sat, S.libs.sat ? 'loaded' : 'missing');
     row('Planet library', S.libs.astro, S.libs.astro ? 'loaded' : 'missing');
     for (const gr of GROUPS) if (Sats.status[gr.id] != null) row('CelesTrak · ' + gr.name, typeof Sats.status[gr.id] === 'number', typeof Sats.status[gr.id] === 'number' ? fmt(Sats.status[gr.id]) + ' · ' + ((Date.now() - (Sats.age[gr.id] || Date.now())) / 3600e3).toFixed(1) + ' h old' : String(Sats.status[gr.id]));
