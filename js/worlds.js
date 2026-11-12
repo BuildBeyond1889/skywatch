@@ -369,7 +369,11 @@ WORLDS.ground = (() => {
 // INVISIBLE INFRASTRUCTURE: the geostationary belt, navigation satellites, cell and broadcast towers, power lines, data centres.
 // ======================================================================
 WORLDS.infra = (() => {
-  const st = { towers: [], power: [], subs: [], dcs: [], loadedFor: null, at: 0, status: {} };
+  const st = { towers: [], power: [], subs: [], dcs: [], stations: [], loadedFor: null, at: 0, status: {}, carrier: ls.get('carrier', ''), dial: 'FM' };
+  const isCell = x => x.type === 'Cell / radio mast';
+  // The tower your phone is most likely using: the nearest site of your carrier (a website can't read the real one).
+  function servingTower() { let best = null; for (const x of st.towers) { if (!isCell(x) || x.src !== 'FCC') continue; if (st.carrier && !x.ops.includes(st.carrier)) continue; if (!best || x.dist < best.dist) best = x; } return best; }
+  const towerOf = sn => st.towers.find(x => Math.abs(x.lat - sn.lat) < 0.0008 && Math.abs(x.lon - sn.lon) < 0.001);
   const centerOf = e => e.lat != null ? [e.lat, e.lon] : e.center ? [e.center.lat, e.center.lon] : e.geometry ? [e.geometry.reduce((a, n) => a + n.lat, 0) / e.geometry.length, e.geometry.reduce((a, n) => a + n.lon, 0) / e.geometry.length] : null;
   function addTower(e, near) {
     const t = e.tags || {}, c = centerOf(e); if (!c || !/^(mast|tower|communications_tower)$/.test(t.man_made || '')) return;
@@ -424,13 +428,15 @@ WORLDS.infra = (() => {
       done();
     });
     // FM, AM and TV transmitters out to ~100 miles
-    Promise.all([fcc(4, 160, 400), fcc(0, 160, 200), fcc(10, 160, 200)]).then(([fm, am, tv]) => {
+    Promise.all([fcc(4, 160, 400), fcc(0, 160, 200), fcc(11, 160, 200)]).then(([fm, am, tv]) => {
       st.status.fccBroadcast = fm || am || tv ? 'ok' : 'error';
       for (const [list, band] of [[fm, 'FM'], [am, 'AM'], [tv, 'TV']]) for (const f of list || []) {
         const c = ll(f), p = f.properties || {}; if (!c) continue;
         if (p.status && /^(CP|DEL|CAN)/i.test(p.status)) continue;
         const freq = band === 'FM' ? (p.frequency ? ' ' + parseFloat(p.frequency) : '') : band === 'AM' ? (p.frequency ? ' ' + parseFloat(p.frequency) + ' kHz' : '') : (p.channel ? ' ch ' + p.channel : '');
         addFcc(c[0], c[1], 'Broadcast tower', (p.callsign || band) + freq, titleCase(p.licensee || ''), +p.haat > 0 ? Math.min(+p.haat, 600) : 0, 'FCC');
+        const f0 = parseFloat(band === 'TV' ? p.channel : p.frequency);
+        if (p.callsign && !st.stations.some(x => x.call === p.callsign && x.band === band)) st.stations.push({ call: p.callsign, band, freq: isFinite(f0) ? f0 : 0, city: titleCase(p.city || ''), op: titleCase(p.licensee || ''), service: p.service || '', lat: c[0], lon: c[1], dist: gcKm(S.obs.lat, S.obs.lon, c[0], c[1]) });
       }
       done();
     });
@@ -441,7 +447,7 @@ WORLDS.infra = (() => {
     for (const gid of ['geo', 'gnss']) if (!Sats.status[gid]) loadGroup(gid);
     const key = S.obs.lat.toFixed(2) + ',' + S.obs.lon.toFixed(2);
     if (st.loadedFor === key && !force) return; st.loadedFor = key;
-    st.towers = []; st.power = []; st.subs = []; st.dcs = [];
+    st.towers = []; st.power = []; st.subs = []; st.dcs = []; st.stations = [];
     loadFcc();
     const L = S.obs.lat, N = S.obs.lon, tag = '["man_made"~"^(mast|tower|communications_tower)$"]';
     const bb = km => { const dl = km / 111, dn = km / (111 * Math.max(Math.cos(L * D2R), 0.2)); return [(L - dl).toFixed(3), (N - dn).toFixed(3), (L + dl).toFixed(3), (N + dn).toFixed(3)].join(','); };
@@ -510,6 +516,7 @@ WORLDS.infra = (() => {
       for (const sb of st.subs) { sb.v = geoEnu(sb.lat, sb.lon, sb.plant ? 0.05 : 0.005); const p = project(sb.v); if (!onScreen(p, 4)) continue; g.strokeStyle = C(sb.plant ? '#ff6b5e' : '#ffb45a'); g.lineWidth = 1.5; g.strokeRect(p.x - 5, p.y - 5, 10, 10); if (sb.plant) { g.beginPath(); g.moveTo(p.x - 3, p.y + 2); g.lineTo(p.x, p.y - 3); g.lineTo(p.x + 3, p.y + 2); g.stroke(); } hits.push({ x: p.x, y: p.y, r: 20, o: sb, pr: 3 }); label(placed, p.x, p.y, 6, sb.name, (sb.plant ? 'POWER PLANT' + (sb.volt ? ' · ' + sb.volt.toUpperCase() : '') : 'SUBSTATION') + ' · ' + kmTxt(Math.hypot(...sb.v)), C('#fff1d6'), C(sb.plant ? '#ff8a7a' : '#ffb45a'), 3); }
     }
     if (chip === 'all' || chip === 'towers') {
+      st.sv = servingTower();
       for (const tw of st.towers) {
         tw.v = geoEnu(tw.lat, tw.lon, tw.h / 1000); const p = project(tw.v); if (!onScreen(p, 4)) continue;
         const col = tw.type === 'Cell / radio mast' ? '#5ad1ff' : '#ff9ad0', d = Math.hypot(...tw.v), hidden = altOf(tw.v) < -0.05 && d > 25;
@@ -518,8 +525,23 @@ WORLDS.infra = (() => {
         const ph = ((t + tw.lat * 1e5) % 1800) / 1800; g.strokeStyle = C(col, 0.6 * (1 - ph)); g.beginPath(); g.arc(p.x, p.y - 4, 4 + ph * 14, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
         hits.push({ x: p.x, y: p.y, r: 20, o: tw, pr: 4 });
         g.globalAlpha = 1;
-        if (tw.type !== 'Cell / radio mast' || d < 8 || tw === S.sel) label(placed, p.x, p.y, 8, tw.name !== tw.type ? tw.name : tw.op || tw.type, (tw.op && tw.name !== tw.type ? tw.op.toUpperCase() + ' · ' : '') + kmTxt(d) + (hidden ? ' · BEYOND HORIZON' : ''), C('#ffffff'), C(col), tw === S.sel ? 9 : 4, tw === S.sel);
+        if (tw !== st.sv && (tw.type !== 'Cell / radio mast' || d < 8 || tw === S.sel)) label(placed, p.x, p.y, 8, tw.name !== tw.type ? tw.name : tw.op || tw.type, (tw.op && tw.name !== tw.type ? tw.op.toUpperCase() + ' · ' : '') + kmTxt(d) + (hidden ? ' · BEYOND HORIZON' : ''), C('#ffffff'), C(col), tw === S.sel ? 9 : 4, tw === S.sel);
         if (tw === S.sel) drawReticle(p, t, col);
+      }
+      // your phone's likely link: packets flowing down from the tower to the bottom of the screen
+      const sv = st.sv;
+      if (sv && sv.v) {
+        const p = project(sv.v), x0 = W / 2, y0 = ZONE.bot - 4;
+        if (onScreen(p, 0)) {
+          const gr = g.createLinearGradient(p.x, p.y, x0, y0); gr.addColorStop(0, C('#5ad1ff', 0.9)); gr.addColorStop(1, C('#5ad1ff', 0.15));
+          g.strokeStyle = gr; g.lineWidth = 2; g.setLineDash([2, 7]); g.lineDashOffset = -(t / 40) % 9; g.beginPath(); g.moveTo(p.x, p.y - 4); g.lineTo(x0, y0); g.stroke(); g.setLineDash([]); g.lineDashOffset = 0;
+          for (let k = 0; k < 4; k++) { const f = ((t / 1400) + k / 4) % 1, x = p.x + (x0 - p.x) * f, y = p.y - 4 + (y0 - p.y + 4) * f; g.fillStyle = C('#bff0ff', 0.9 * (1 - f)); g.beginPath(); g.arc(x, y, 2.6, 0, 6.283); g.fill(); }
+          g.strokeStyle = C('#5ad1ff', 0.9); g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y - 4, 12 + 3 * Math.sin(t / 300), 0, 6.283); g.stroke();
+          label(placed, p.x, p.y, 14, 'Your phone’s likely tower', (st.carrier || 'NEAREST CELL SITE').toUpperCase() + ' · ' + kmTxt(Math.hypot(...sv.v)), C('#ffffff'), C('#5ad1ff'), 9, true);
+        } else {
+          g.font = MONO; g.fillStyle = C('#bff0ff'); g.textAlign = 'center';
+          g.fillText('YOUR LIKELY TOWER · ' + kmTxt(sv.dist) + ' ' + cardinal(azOf(sv.v)) + ' · TURN TO FIND IT', W / 2, ZONE.bot - 10); g.textAlign = 'left';
+        }
       }
       for (const dc of st.dcs) { dc.v = geoEnu(dc.lat, dc.lon, 0.01); const p = project(dc.v); if (!onScreen(p, 4)) continue; g.fillStyle = C('#c9a8ff'); g.fillRect(p.x - 4, p.y - 4, 8, 8); hits.push({ x: p.x, y: p.y, r: 20, o: dc, pr: 3 }); label(placed, p.x, p.y, 6, dc.name, (dc.op ? dc.op.toUpperCase() + ' · ' : '') + kmTxt(Math.hypot(...dc.v)), C('#f1e8ff'), C('#c9a8ff'), 3); }
     }
@@ -536,7 +558,7 @@ WORLDS.infra = (() => {
     if (o.kind === 'tower') {
       const t = o.tags || {}, d = Math.hypot(...(o.v || [0, 0, 0]));
       const extra = ['height', 'communication:mobile_phone', 'communication:television', 'communication:radio', 'communication:microwave'].filter(k => t[k]).map(k => `<div class="kv"><span>${esc(k.replace('communication:', '').replace('_', ' '))}</span><span>${esc(t[k])}</span></div>`).join('');
-      return close + `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">${esc(o.type.toUpperCase())}${o.op ? ' · ' + esc(o.op.toUpperCase()) : ''}</div></div></div><div class="stats">${stat('AWAY', fmt(dv(d).toFixed(1)), du())}${stat('BEARING', azOf(o.v || [0, 1, 0]).toFixed(0), '°')}${stat('HEIGHT', Math.round(o.h), 'm')}${stat('ELEV', altOf(o.v || [0, 1, 0]).toFixed(1), '°')}</div>${extra ? '<div class="about">' + extra + '</div>' : ''}${o.calls && o.calls.length > 1 ? `<div class="card-foot"><span>Licences on this tower: ${esc(o.calls.join(', '))}</span></div>` : ''}${o.ops && o.ops.length > 1 ? `<div class="card-foot"><span>Operators: ${esc(o.ops.join(', '))}</span></div>` : ''}<span class="muted" style="font-size:11px">${o.src === 'FCC' ? 'FCC licence data (via HIFLD). Positions are where the licence says the antenna is.' : 'Map data © OpenStreetMap contributors. Not every mast is mapped.'}</span>`;
+      return close + `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">${esc(o.type.toUpperCase())}${o.op ? ' · ' + esc(o.op.toUpperCase()) : ''}</div></div></div><div class="stats">${stat('AWAY', fmt(dv(d).toFixed(1)), du())}${stat('BEARING', azOf(o.v || [0, 1, 0]).toFixed(0), '°')}${stat('HEIGHT', Math.round(o.h), 'm')}${stat('ELEV', altOf(o.v || [0, 1, 0]).toFixed(1), '°')}</div>${extra ? '<div class="about">' + extra + '</div>' : ''}${o === servingTower() ? `<div class="card-foot"><span><b>Probably your phone’s tower.</b> It’s the nearest ${esc(st.carrier || 'cell')} site. Phones usually connect to the closest site with a clear path, but busy or blocked sites hand you to the next one.</span></div>` : ''}${(() => { const ss = st.stations.filter(sn => towerOf(sn) === o).sort((a, b) => a.band.localeCompare(b.band) || a.freq - b.freq); return ss.length ? `<div class="srch">${ss.map(sn => `<div class="srch-row"><span><b>${sn.band === 'TV' ? 'CH ' + sn.freq : sn.freq + (sn.band === 'AM' ? ' kHz' : ' MHz')}</b> ${esc(sn.call)}</span><span>${esc(sn.band)}${sn.city ? ' · ' + esc(sn.city.toUpperCase()) : ''}</span></div>`).join('')}</div>` : o.calls && o.calls.length > 1 ? `<div class="card-foot"><span>Licences on this tower: ${esc(o.calls.join(', '))}</span></div>` : ''; })()}${o.ops && o.ops.length > 1 ? `<div class="card-foot"><span>Operators: ${esc(o.ops.join(', '))}</span></div>` : ''}<span class="muted" style="font-size:11px">${o.src === 'FCC' ? 'FCC licence data (via HIFLD). Positions are where the licence says the antenna is.' : 'Map data © OpenStreetMap contributors. Not every mast is mapped.'}</span>`;
     }
     if (o.kind === 'power' || o.kind === 'sub' || o.kind === 'dc') {
       const d = Math.hypot(...(o.v || [0, 0, 0]));
@@ -557,7 +579,12 @@ WORLDS.infra = (() => {
       const tw = st.towers.slice(0, 6).concat(st.towers.filter(x => x.type !== 'Cell / radio mast').slice(0, 4)).filter((x, i, arr) => arr.indexOf(x) === i), cells = st.towers.filter(x => x.type === 'Cell / radio mast').length;
       const rows = tw.map((x, i) => { const v = geoEnu(x.lat, x.lon, x.h / 1000); return `<button type="button" class="srch-row" data-tw="${st.towers.indexOf(x)}"><span>${esc(x.name)}${x.type === 'Cell / radio mast' ? ' <small class="muted">CELL</small>' : ''}</span><span>${kmTxt(x.dist)} ${cardinal(azOf(v))}${altOf(v) < -0.05 && x.dist > 25 ? ' · BEYOND HORIZON' : ''}</span></button>`; }).join('');
       return `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">Nearest towers</div><div class="card-sub mono">${cells} CELL SITES WITHIN 5 MI · ${st.towers.length - cells} BROADCAST WITHIN 100 MI · ${st.power.length} POWER LINES · ${st.subs.length} SUBSTATIONS/PLANTS</div></div></div>
+        <div class="seg" id="carrierSeg">${['', 'Verizon', 'AT&T', 'T-Mobile'].map(c => `<button type="button" data-c="${esc(c)}" aria-pressed="${st.carrier === c}">${c || 'Any carrier'}</button>`).join('')}</div>
+        ${(() => { const sv = servingTower(); return sv ? `<div class="srch"><button type="button" class="srch-row" data-tw="${st.towers.indexOf(sv)}"><span><b style="color:#5ad1ff">Your likely tower</b> · ${esc(sv.name)}</span><span>${kmTxt(sv.dist)} ${cardinal(azOf(geoEnu(sv.lat, sv.lon, sv.h / 1000)))}</span></button></div>` : ''; })()}
         <div class="srch">${rows || `<p class="muted" style="margin:0">${busy ? 'Loading map data… this can take up to a minute the first time.' : 'No broadcast towers are mapped near you.'}</p>`}</div>
+        ${st.stations.length ? `<details id="radioDial"${st.dialOpen ? ' open' : ''}><summary class="mono" style="cursor:pointer;font-size:11px;letter-spacing:.06em">RADIO DIAL · ${st.stations.filter(x => x.band !== 'TV').length} STATIONS · ${st.stations.filter(x => x.band === 'TV').length} TV</summary>
+          <div class="seg" id="dialSeg">${['FM', 'AM', 'TV'].map(b => `<button type="button" data-b="${b}" aria-pressed="${st.dial === b}">${b}</button>`).join('')}</div>
+          <div class="srch" style="max-height:220px;overflow:auto">${st.stations.filter(x => x.band === st.dial).sort((a, b) => a.freq - b.freq).map(sn => `<button type="button" class="srch-row" data-sn="${st.stations.indexOf(sn)}"><span><b>${st.dial === 'TV' ? 'CH ' + sn.freq : sn.freq + (st.dial === 'AM' ? ' kHz' : '')}</b> ${esc(sn.call)}${sn.city ? ' · ' + esc(sn.city) : ''}</span><span>${kmTxt(sn.dist)} ${cardinal(bearingTo(S.obs.lat, S.obs.lon, sn.lat, sn.lon))}</span></button>`).join('') || '<p class="muted" style="margin:0">None found nearby.</p>'}</div></details>` : ''}
         <div class="muted mono" style="font-size:10px">${[['fccCell', 'FCC CELL SITES'], ['fccBroadcast', 'FCC FM/AM/TV'], ['near', 'OSM MASTS'], ['far', 'OSM BIG TOWERS'], ['power', 'OSM POWER']].map(([k, n]) => n + ' ' + (s[k] === 'ok' ? '✓' : s[k] === 'error' ? '✕' : '…')).join(' · ')}</div>
         ${bad ? '<div class="card-actions"><button type="button" class="btn small" id="infraRetry">Some sources failed. Try again</button></div>' : ''}
         <span class="muted" style="font-size:11px">Towers: FCC licence data via HIFLD, plus OpenStreetMap. Power: © OpenStreetMap contributors.</span>`;
@@ -566,6 +593,10 @@ WORLDS.infra = (() => {
     wireHome(card) {
       $$('[data-tw]', card).forEach(b => b.onclick = () => { const x = st.towers[+b.dataset.tw]; if (!x) return; x.v = geoEnu(x.lat, x.lon, x.h / 1000); select(x); if (S.mode === 'sky') { S.viewAz = azOf(x.v); S.viewAlt = 2; S.zoom = 3; } });
       const r = $('#infraRetry', card); if (r) r.onclick = () => { load(true); };
+      $$('#carrierSeg button', card).forEach(b => b.onclick = e => { e.stopPropagation(); st.carrier = b.dataset.c; ls.set('carrier', st.carrier); cardFor = null; updateCard(simNow(), true); });
+      $$('#dialSeg button', card).forEach(b => b.onclick = e => { e.stopPropagation(); st.dial = b.dataset.b; cardFor = null; updateCard(simNow(), true); });
+      const dl = $('#radioDial', card); if (dl) dl.ontoggle = () => { st.dialOpen = dl.open; };
+      $$('[data-sn]', card).forEach(b => b.onclick = () => { const sn = st.stations[+b.dataset.sn], x = sn && towerOf(sn); if (!x) return; x.v = geoEnu(x.lat, x.lon, x.h / 1000); select(x); if (S.mode === 'sky') { S.viewAz = azOf(x.v); S.viewAlt = 2; S.zoom = 3; } });
     },
     chips: [['all', 'Everything'], ['space', 'Satellites'], ['towers', 'Towers'], ['power', 'Power grid']],
     hud: () => '<b>' + st.towers.length + '</b> TOWERS · <b>' + st.power.length + '</b> LINES', below: true,
