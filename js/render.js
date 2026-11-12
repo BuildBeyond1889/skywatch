@@ -66,12 +66,12 @@
     hits = [];
     const ar = S.mode === 'ar';
     const sunAlt = SUN.v ? altOf(SUN.v) : -30;
-    const bg = !ar || S.noFeed;
+    const bg = (!ar || S.noFeed) && !S.photo;
     if (bg) drawSkyBackground(sunAlt);
     if (bg && S.f.layers.stars && sunAlt < -8) drawMilkyWay(now);
     if (S.f.layers.grid) drawGrid(ar);
     const world = S.world !== 'sky' ? WORLDS[S.world] : null;
-    if (!(world && world.id === 'ground' && wchip('ground') === 'peel')) drawHorizon((ar && !S.noFeed) || (world && world.below));
+    if (!(world && world.id === 'ground' && wchip('ground') === 'peel')) drawHorizon((ar && !S.noFeed) || !!S.photo || (world && world.below));
     const placed = [];
     if (world) { world.draw(now, placed, t, ar); drawArrows(t, placed); if (S.align) drawAlignTargets(); return; }
     const dens = { few: { star: 0.6, sat: 5 }, smart: { star: 1.6, sat: 12 }, all: { star: 2.7, sat: 45 } }[S.f.density] || { star: 1.6, sat: 12 };
@@ -145,6 +145,7 @@
       for (const [a, b] of S.sel.lines) { if (!a.v || !b.v) continue; const pa = project(a.v), pb = project(b.v); if (pa.ok && pb.ok) { g.moveTo(pa.x, pa.y); g.lineTo(pb.x, pb.y); } }
       g.stroke();
     }
+    drawLaunches(now, placed, t);
     drawArrows(t, placed);
     if (S.align) drawAlignTargets();
     if (S.f.showDetect && ST.pts && performance.now() - ST.ptsAt < 1600 && S.mode === 'ar') {

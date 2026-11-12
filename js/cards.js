@@ -126,7 +126,8 @@
     }
     const t = now.getTime();
     let html = '';
-    if (o.kind === 'worldhome') html = WORLDS[S.world].home(now);
+    if (o.kind === 'launch') html = launchCard(o, now);
+    else if (o.kind === 'worldhome') html = WORLDS[S.world].home(now);
     else if (o.world && WORLDS[o.world]) html = WORLDS[o.world].card(o, now);
     else if (o.kind === 'sat') {
       const v = o.v ? satDir(o, t) : null, alt = v ? altOf(v) : -90, az = v ? azOf(v) : 0;
@@ -234,6 +235,7 @@
     const cc = $('#cardClose', card); if (cc) cc.onclick = () => select(null);
     if (o.kind === 'worldhome' && WORLDS[S.world].wireHome) WORLDS[S.world].wireHome(card);
     if (o.world && WORLDS[o.world] && WORLDS[o.world].wire) WORLDS[o.world].wire(card, o);
+    if (o.kind === 'launch') launchWire(card, o);
     const sb = $('#seenBtn', card); if (sb) sb.onclick = () => logSeen(o);
     const fb = $('#famBtn', card); if (fb) fb.onclick = () => setFamily(S.family && S.family.key === o.launch ? null : o);
     const cb = $('#calBtn', card); if (cb) cb.onclick = () => passToCalendar(o, o.next);
@@ -267,6 +269,7 @@
   }
   // Collapsed card: one line, or a sideways strip for the spacecraft list.
   function compactFor(o, now) {
+    if (o.kind === 'launch') return launchCompact(o, now);
     if (o.kind === 'worldhome') return WORLDS[S.world].homeCompact ? WORLDS[S.world].homeCompact(now) : '';
     if (o.world && WORLDS[o.world]) return WORLDS[o.world].compact(o, now);
     if (o.kind === 'stationhome') {

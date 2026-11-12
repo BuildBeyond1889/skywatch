@@ -199,6 +199,7 @@
     closeSheets();
     const k = go.split(':')[0], v = go.slice(go.indexOf(':') + 1);
     if (k === 'shower') { S.feat = v; setView('meteor'); return; }
+    if (k === 'launch') { goLaunch(v); return; }
     if (k === 'transit') {
       const [id, tt, body] = v.split(':'), st = Sats.byId.get(+id); if (!st) return;
       if (S.view !== 'orbit') setView('orbit');
@@ -317,7 +318,7 @@
     if (ll && ll.results) {
       for (const L of ll.results.filter(x => new Date(x.net) - now < 7 * 864e5).slice(0, 4)) {
         const d = new Date(L.net), hrs = (d - now) / 3600e3;
-        ev.push(evRow('launch', '#5ad1ff', esc(L.name), hrs < 0 ? 'NOW' : hrs < 48 ? 'T−' + Math.floor(hrs) + 'H ' + Math.round((hrs % 1) * 60) + 'M' : dfmt(d).toUpperCase(), esc((L.lsp_name || (L.launch_service_provider && L.launch_service_provider.name) || '') + (L.location || (L.pad && L.pad.location && L.pad.location.name) ? ' · ' + (L.location || L.pad.location.name) : '')), `${dfmt(d).toUpperCase()} ${tfmt(d)} · ${esc(((L.status && (L.status.abbrev || L.status.name)) || '').toUpperCase())}`));
+        ev.push(evGo('launch:' + L.id, 'launch', '#5ad1ff', esc(L.name), hrs < 0 ? 'NOW' : hrs < 48 ? 'T−' + Math.floor(hrs) + 'H ' + Math.round((hrs % 1) * 60) + 'M' : dfmt(d).toUpperCase(), esc((L.lsp_name || (L.launch_service_provider && L.launch_service_provider.name) || '') + (L.location || (L.pad && L.pad.location && L.pad.location.name) ? ' · ' + (L.location || L.pad.location.name) : '')), `${dfmt(d).toUpperCase()} ${tfmt(d)} · ${esc(((L.status && (L.status.abbrev || L.status.name)) || '').toUpperCase())}`));
         if (hrs < 24) evCount++;
       }
     }
@@ -449,7 +450,7 @@
     const row = (k, ok, v) => rows.push(`<div class="kv"><span>${ok === true ? '✓' : ok === false ? '✗' : '•'} ${esc(k)}</span><span>${esc(v)}</span></div>`);
     const render = () => { out.innerHTML = rows.join(''); };
     out.innerHTML = '<p class="muted">Checking…</p>';
-    row('App version', null, 'v25 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
+    row('App version', null, 'v26 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
     row('Orbit math library', S.libs.sat, S.libs.sat ? 'loaded' : 'missing');
     row('Planet library', S.libs.astro, S.libs.astro ? 'loaded' : 'missing');
     for (const gr of GROUPS) if (Sats.status[gr.id] != null) row('CelesTrak · ' + gr.name, typeof Sats.status[gr.id] === 'number', typeof Sats.status[gr.id] === 'number' ? fmt(Sats.status[gr.id]) + ' · ' + ((Date.now() - (Sats.age[gr.id] || Date.now())) / 3600e3).toFixed(1) + ' h old' : String(Sats.status[gr.id]));
@@ -522,20 +523,22 @@
     setGalTab(galTab);
     const shots = (await idb.shots()).sort((a, b) => b.id - a.id);
     $('#shotEmpty').hidden = shots.length > 0;
-    $('#shotGrid').innerHTML = shots.map(sh => `<button type="button" data-id="${sh.id}" aria-label="Snapshot from ${esc(new Date(sh.t).toLocaleString())}"><img alt="" src="${sh.thumb}"></button>`).join('');
+    $('#shotGrid').innerHTML = shots.map(sh => `<button type="button" data-id="${sh.id}" aria-label="${sh.video ? 'Clip' : 'Snapshot'} from ${esc(new Date(sh.t).toLocaleString())}"><img alt="" src="${sh.thumb}">${sh.video ? '<span class="playmark">▶</span>' : ''}</button>`).join('');
     $$('#shotGrid button').forEach(b => b.onclick = () => openViewer(shots.find(s => s.id === +b.dataset.id)));
   }
   let viewing = null, viewURL = null;
   function openViewer(sh) {
     viewing = sh; if (viewURL) URL.revokeObjectURL(viewURL); viewURL = URL.createObjectURL(sh.blob);
-    $('#viewerImg').src = viewURL; $('#viewer').hidden = false;
+    const vid = $('#viewerVid'), im = $('#viewerImg');
+    if (sh.video) { im.hidden = true; vid.hidden = false; vid.src = viewURL; vid.play().catch(() => {}); } else { vid.pause(); vid.removeAttribute('src'); vid.hidden = true; im.hidden = false; im.src = viewURL; }
+    $('#viewer').hidden = false;
   }
-  $('#vClose').onclick = () => { $('#viewer').hidden = true; };
+  $('#vClose').onclick = () => { $('#viewer').hidden = true; try { $('#viewerVid').pause(); } catch (e) { /* ignore */ } };
   $('#vDelete').onclick = async () => { if (!viewing) return; await idb.delShot(viewing.id); $('#viewer').hidden = true; buildGallery(); const rest = (await idb.shots()).sort((a, b) => b.id - a.id); setGalleryThumb(rest[0] && rest[0].thumb); };
   $('#vShare').onclick = async () => {
     if (!viewing) return;
-    const name = 'skywatch-' + new Date(viewing.t).toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.jpg';
-    const file = new File([viewing.blob], name, { type: 'image/jpeg' });
+    const mt = viewing.mime || 'image/jpeg', name = 'skywatch-' + new Date(viewing.t).toISOString().slice(0, 16).replace(/[:T]/g, '-') + (mt.includes('mp4') ? '.mp4' : mt.includes('webm') ? '.webm' : '.jpg');
+    const file = new File([viewing.blob], name, { type: mt });
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sky Watch' }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
     const a = document.createElement('a'); a.href = viewURL; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   };

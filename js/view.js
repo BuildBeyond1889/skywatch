@@ -64,12 +64,14 @@
       const rn = Math.hypot(r[0], r[1], r[2]) || 1; r = r.map(x => x / rn);
       const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
       M = [r[0], u[0], -f[0], r[1], u[1], -f[1], r[2], u[2], -f[2]];
+      if (S.photo && S.roll) M = mmul(M, rz(S.roll));
     }
     return M;
   }
   function focal() {
     let long = Math.max(W, H), sc = 1;
-    if (S.mode === 'ar' && cam.videoWidth) {
+    if (S.photo) { long = Math.max(S.photo.w, S.photo.h) * Math.min(W / S.photo.w, H / S.photo.h); }
+    else if (S.mode === 'ar' && cam.videoWidth) {
       sc = Math.max(W / cam.videoWidth, H / cam.videoHeight);
       long = Math.max(cam.videoWidth, cam.videoHeight) * sc;
     }

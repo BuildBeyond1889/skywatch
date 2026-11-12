@@ -154,7 +154,7 @@
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (gest.type === 'pinch' && ptrs.size === 2) {
       const [a, b] = [...ptrs.values()];
-      S.zoom = clamp(gest.z0 * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(gest.d0, 1), 1, 10);
+      S.zoom = clamp(gest.z0 * Math.hypot(a.x - b.x, a.y - b.y) / Math.max(gest.d0, 1), S.photo ? 0.4 : 1, 10);
       return;
     }
     if (gest.type === 'tap' && Math.hypot(e.clientX - gest.x0, e.clientY - gest.y0) > 8) { gest.type = 'drag'; S.dragging = true; }
@@ -174,7 +174,7 @@
   };
   sky.addEventListener('pointerup', endPtr);
   sky.addEventListener('pointercancel', endPtr);
-  sky.addEventListener('wheel', e => { e.preventDefault(); S.zoom = clamp(S.zoom * Math.exp(-e.deltaY * 0.0015), 1, 10); }, { passive: false });
+  sky.addEventListener('wheel', e => { e.preventDefault(); S.zoom = clamp(S.zoom * Math.exp(-e.deltaY * 0.0015), S.photo ? 0.4 : 1, 10); }, { passive: false });
   function tapAt(x, y) {
     let best = null, bd = 1e9;
     for (const h of hits) {

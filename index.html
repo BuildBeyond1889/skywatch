@@ -221,6 +221,19 @@ body.ar .glass { -webkit-backdrop-filter: none; backdrop-filter: none; backgroun
 #galleryBtn svg, #filterBtn svg { width: 22px; height: 22px; stroke: var(--fg); fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 #filterBtn { width: 44px; height: 44px; }
 
+#photoBg { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+body.photo #sky { background: transparent; }
+#recBar { position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--st) + 12px); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 999px; }
+#recBar .recdot { width: 10px; height: 10px; border-radius: 50%; background: #ff3b30; animation: recblink 1s steps(2) infinite; }
+@keyframes recblink { 50% { opacity: 0.2; } }
+#recBar button { height: 36px; padding: 0 16px; border: none; border-radius: 999px; background: #ff3b30; color: #fff; font-weight: 700; }
+#photoBar { position: fixed; left: 12px; right: 12px; top: calc(var(--st) + 150px); z-index: 55; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border-radius: 18px; }
+#photoBar input[type=range] { flex: 1; min-width: 120px; }
+body.photo #controls, body.photo.ptime #timebar, body.photo #chips, body.photo #card { display: none !important; }
+.mediarow { gap: 8px; margin: 0 0 10px; flex-wrap: wrap; }
+.shots button { position: relative; }
+.playmark { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; display: grid; place-items: center; font-size: 13px; }
+#viewer video { flex: 1; min-height: 0; width: 100%; background: #000; }
 #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity 0.5s ease; }
 #flash.on { opacity: 0.85; transition: none; }
 
@@ -317,6 +330,7 @@ a { color: var(--accent); }
 </head>
 <body>
 <video id="cam" playsinline muted autoplay hidden></video>
+<img id="photoBg" alt="" hidden>
 <div id="redwash"></div>
 <canvas id="sky" aria-label="Sky view. Tap an object for details."></canvas>
 
@@ -404,11 +418,13 @@ a { color: var(--accent); }
   <div class="sheet-head"><h2>Your sky</h2><button type="button" class="btn small primary" id="snapBtn">Take snapshot</button><button type="button" class="btn small" data-close>Done</button></div>
   <div class="sheet-body"><div class="seg" id="galTabs"><button type="button" data-v="log">Spotter log</button><button type="button" data-v="shots">Snapshots</button></div>
   <div id="logPane"></div>
-  <div id="shotPane" hidden><div class="shots" id="shotGrid"></div><p class="muted" id="shotEmpty">Snapshots you take are saved here, on this phone only.</p></div></div>
+  <div id="shotPane" hidden><div class="row mediarow"><button type="button" class="btn small" id="recBtn">● Record a clip</button><button type="button" class="btn small" id="photoBtn">Label a photo</button><input type="file" id="photoFile" accept="image/*" hidden></div><div class="shots" id="shotGrid"></div><p class="muted" id="shotEmpty">Snapshots you take are saved here, on this phone only.</p></div></div>
 </section>
 
-<div id="viewer" hidden><img id="viewerImg" alt="Labeled sky snapshot"><div class="row"><button type="button" class="btn primary" id="vShare">Save or share</button><button type="button" class="btn" id="vDelete">Delete</button><button type="button" class="btn" id="vClose">Close</button></div></div>
+<div id="viewer" hidden><img id="viewerImg" alt="Labeled sky snapshot"><video id="viewerVid" controls playsinline loop hidden></video><div class="row"><button type="button" class="btn primary" id="vShare">Save or share</button><button type="button" class="btn" id="vDelete">Delete</button><button type="button" class="btn" id="vClose">Close</button></div></div>
 
+<div id="recBar" class="glass" hidden><span class="recdot"></span><span id="recTime" class="mono">0:00 / 0:30</span><button type="button" id="recStop">Stop</button></div>
+<div id="photoBar" class="glass" hidden><label class="mono" for="photoRoll">TWIST</label><input type="range" id="photoRoll" min="-45" max="45" step="0.5" value="0"><button type="button" class="btn small primary" id="photoSave">Save labelled photo</button><button type="button" class="btn small" id="photoDone">Done</button></div>
 <div id="start">
   <div class="inner">
     <div class="eyebrow" id="startEyebrow">LIVE ORBIT TRACKER</div>
@@ -422,17 +438,18 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=25"></script>
-<script src="deep.js?v=25"></script>
-<script src="js/geomag.js?v=25"></script>
-<script src="js/core.js?v=25"></script>
-<script src="js/data.js?v=25"></script>
-<script src="js/view.js?v=25"></script>
-<script src="js/render.js?v=25"></script>
-<script src="js/cards.js?v=25"></script>
-<script src="js/sensing.js?v=25"></script>
-<script src="js/ui.js?v=25"></script>
-<script src="js/worlds.js?v=25"></script>
-<script src="js/main.js?v=25"></script>
+<script src="stars.js?v=26"></script>
+<script src="deep.js?v=26"></script>
+<script src="js/geomag.js?v=26"></script>
+<script src="js/core.js?v=26"></script>
+<script src="js/data.js?v=26"></script>
+<script src="js/view.js?v=26"></script>
+<script src="js/render.js?v=26"></script>
+<script src="js/cards.js?v=26"></script>
+<script src="js/sensing.js?v=26"></script>
+<script src="js/ui.js?v=26"></script>
+<script src="js/worlds.js?v=26"></script>
+<script src="js/main.js?v=26"></script>
+<script src="js/extras.js?v=26"></script>
 </body>
 </html>
