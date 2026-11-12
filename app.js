@@ -196,6 +196,7 @@
     f: Object.assign({ groups: Object.fromEntries(GROUPS.map(g => [g.id, g.on])), hMin: 0, hMax: 14, density: 'smart',
       layers: { stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true } }, ls.get('filters', {})),
     alarms: [], events: [], planetsAt: 0, starsAt: 0, libs: { sat: false, astro: false },
+    dprCap: 2, collapse: {}, noFeed: false, clear: false,
     view: 'orbit', deepPreset: 'all', feat: null, featObj: null, autoCatch: false, caught: 0, angVel: 0
   };
   S.f.groups = Object.assign(Object.fromEntries(GROUPS.map(g => [g.id, g.on])), S.f.groups || {});
@@ -208,7 +209,7 @@
   const cam = $('#cam'), sky = $('#sky'), g = sky.getContext('2d'), tape = $('#tape'), tg = tape.getContext('2d');
   let W = 0, H = 0, DPR = 1;
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    DPR = Math.min(window.devicePixelRatio || 1, S.dprCap || 2);
     W = window.innerWidth; H = window.innerHeight;
     sky.width = Math.round(W * DPR); sky.height = Math.round(H * DPR);
     const r = tape.getBoundingClientRect();
@@ -594,7 +595,7 @@
       S.absolute = e.type === 'deviceorientationabsolute' || e.absolute === true;
     }
     R = mmul(R, rz(-screenAngle()));
-    S.qT = m2q(R);
+    S.qT = m2q(R); S.gotOrient = true;
     if (!S.q) S.q = S.qT;
     S.lastOrient = performance.now();
   }
@@ -651,6 +652,7 @@
   const ZONE = { top: 150, bot: 9999 };
   function updateZones() {
     const top = $('#top'), low = $('#lower');
+    if (S.clear) { ZONE.top = 8; ZONE.bot = H - 70; return; }
     ZONE.top = top.hidden ? 0 : top.getBoundingClientRect().bottom + 6;
     let b = H;
     if (!low.hidden) for (const el of [$('#card'), $('#timebar')]) if (!el.hidden) { b = Math.min(b, el.getBoundingClientRect().top - 6); }
@@ -660,10 +662,12 @@
   function frame() {
     requestAnimationFrame(frame);
     const nowP = performance.now(), dt = clamp((nowP - lastFrame) / 1000, 0, 0.1); lastFrame = nowP; tick++;
+    S.ft = (S.ft || 16) * 0.95 + 0.05 * dt * 1000;
+    if (S.ft > 26 && nowP - (S.perfAt || 0) > 2500 && S.dprCap > 1) { S.dprCap = Math.max(1, S.dprCap - 0.5); S.perfAt = nowP; resize(); }
     if (!S.obs) return;
     const now = simNow(), tms = now.getTime();
     try {
-      if (S.mode === 'ar' && S.started && nowP - S.lastOrient > 2500 && !S.noSensorWarned) {
+      if (S.mode === 'ar' && S.started && !S.gotOrient && nowP - S.arStart > 4000 && !S.noSensorWarned) {
         S.noSensorWarned = true;
         toast('No motion sensors found. Drag to look around instead.', 4000);
         S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera();
@@ -680,8 +684,8 @@
       FOC = focal();
       if (tms - S.starsAt > 1000 || Math.abs(tms - S.starsAt) > 5000) { updateStars(now); S.starsAt = tms; }
       if (Math.abs(tms - S.planetsAt) > 5000) { updatePlanets(now); S.planetsAt = tms; }
-      if (nowP - zoneAt > 400) { zoneAt = nowP; updateZones(); }
-      updateSats(now, S.scrubbing ? 10 : 6);
+      if (nowP - zoneAt > 1000) { zoneAt = nowP; updateZones(); }
+      updateSats(now, S.scrubbing ? 10 : S.ft > 22 ? 3 : 6);
       draw(now);
       starTrack(nowP);
       meteorWatch(nowP);
@@ -698,10 +702,11 @@
     hits = [];
     const ar = S.mode === 'ar';
     const sunAlt = SUN.v ? altOf(SUN.v) : -30;
-    if (!ar) drawSkyBackground(sunAlt);
-    if (!ar && S.f.layers.stars && sunAlt < -8) drawMilkyWay(now);
+    const bg = !ar || S.noFeed;
+    if (bg) drawSkyBackground(sunAlt);
+    if (bg && S.f.layers.stars && sunAlt < -8) drawMilkyWay(now);
     if (S.f.layers.grid) drawGrid(ar);
-    drawHorizon(ar);
+    drawHorizon(ar && !S.noFeed);
     const placed = [];
     const dens = { few: { star: 0.6, sat: 6 }, smart: { star: 1.6, sat: 16 }, all: { star: 2.7, sat: 50 } }[S.f.density] || { star: 1.6, sat: 16 };
     const starDim = ar ? 1 : clamp(1 - (sunAlt + 4) / 10, 0.25, 1);
@@ -975,6 +980,7 @@
   }
   function drawRadiants(now, placed, sunAlt) {
     for (const sh of activeShowers(now)) {
+      if (sh.zhr < 10) continue;
       const p0 = precess(sh.ra, sh.dec, now);
       const v = refract(eqToEnu(p0.ra, p0.dec, gmst(now) + S.obs.lon * D2R, S.obs));
       if (altOf(v) < 0) continue;
@@ -1198,6 +1204,7 @@
     const dot = $('#lockDot'), txt = $('#lockText'), acc = $('#lockAcc');
     dot.className = 'dot';
     if (S.mode !== 'ar') { txt.textContent = 'Sky view'; acc.textContent = ''; dot.classList.add('warn'); }
+    else if (performance.now() - S.lastOrient > 1500) { txt.textContent = 'Sensors paused'; acc.textContent = ''; dot.classList.add('warn', 'pulse'); }
     else if (!S.absolute) { txt.textContent = 'No compass'; acc.textContent = 'ALIGN'; dot.classList.add('bad', 'pulse'); }
     else if (ST.last && Date.now() - ST.last < 20000) { txt.textContent = 'Star lock'; acc.textContent = '±' + Math.max(0.1, ST.rms).toFixed(1) + '°'; dot.classList.add('pulse'); }
     else if (S.alignedAt && Date.now() - S.alignedAt < 6 * 3600e3) { txt.textContent = 'Aligned'; acc.textContent = '±0.5°'; dot.classList.add('pulse'); }
@@ -1232,7 +1239,7 @@
     S.sel = o; cardFor = null;
     rebuildActive();
     if (o && o.kind === 'sat') { computeSat(o, epochCtx(simNow())); o.next = null; nextPassFor(o); }
-    $('#card').hidden = !o && S.view === 'orbit';
+    $('#card').hidden = !o && S.view === 'orbit' && S.preset !== 'stations';
     updateCard(simNow(), true);
   }
   async function nextPassFor(s) {
@@ -1243,8 +1250,8 @@
   function updateCard(now, force) {
     let o = S.sel; const card = $('#card');
     if (!o) {
-      if (S.view === 'orbit') return;
-      o = { kind: S.view === 'meteor' ? 'meteorhome' : 'deephome' };
+      if (S.view === 'orbit' && S.preset !== 'stations') return;
+      o = { kind: S.view === 'meteor' ? 'meteorhome' : S.view === 'deep' ? 'deephome' : 'stationhome' };
     }
     const t = now.getTime();
     let html = '';
@@ -1301,6 +1308,9 @@
         <div class="card-foot"><span>${nowLine}</span></div>
         <div class="card-actions"><button type="button" class="btn small" id="showerCal">Add peak to calendar</button>${catchBtn}</div>
         ${S.autoCatch ? '<div class="card-foot"><span>Rest the phone on something still, pointed at the "Best view" ring. Anything that streaks across gets saved to Snapshots.</span></div>' : ''}`;
+    } else if (o.kind === 'stationhome') {
+      const rows = stationRows(now).map(r => `<button type="button" class="srch-row" data-sat="${r.s.id}"><span>${esc(r.name)}</span><span>${r.where}</span></button>`).join('');
+      html = `<div class="card-head"><div style="flex:1"><div class="card-title">Space stations</div><div class="card-sub mono">${stationRows(now).filter(r => r.up).length} ABOVE YOUR HORIZON NOW · TAP ONE TO TRACK IT</div></div></div><div class="srch">${rows || '<p class="muted">Loading station data…</p>'}</div>`;
     } else if (o.kind === 'deephome') {
       const au = p => probeAU(p, now);
       const rows = PROBES.map(p => { const a = p.v ? altOf(p.v) : -90; return `<button type="button" class="srch-row" data-probe="${esc(p.name)}"><span>${esc(p.name)}</span><span>${(au(p) * 0.1496).toFixed(1)}B KM · ${a > 0 ? cardinal(azOf(p.v)) + ' ' + Math.round(a) + '° UP' : 'BELOW HORIZON'}</span></button>`; }).join('');
@@ -1325,21 +1335,71 @@
         <div class="card-foot"><span>${esc(o.fact)}</span></div>
         <div class="card-foot mono"><span>${alt > 0 ? cardinal(az) + ' ' + az.toFixed(0) + '° · ' + alt.toFixed(1) + '° UP' : 'BELOW YOUR HORIZON NOW'}</span><span>DIRECTION APPROXIMATE</span></div>`;
     }
+    const ck = /home$/.test(o.kind) ? o.kind : 'detail';
+    const collapsed = S.collapse[ck] != null ? S.collapse[ck] : ck !== 'detail';
+    if (collapsed) html = compactFor(o, now);
+    html = `<button type="button" id="cardToggle" aria-label="${collapsed ? 'Show more' : 'Show less'}" aria-expanded="${!collapsed}"><span></span></button>` + html;
     const key = html.length + ':' + html.slice(0, 200) + ':' + html.slice(-300);
     if (!force && key === cardFor) return;
     cardFor = key;
     card.innerHTML = html;
+    card.classList.toggle('collapsed', collapsed);
+    const flip = () => { S.collapse[ck] = !collapsed; cardFor = null; updateCard(simNow(), true); zoneAt = 0; };
+    $('#cardToggle', card).onclick = flip;
+    const mini = $('.mini', card); if (mini) mini.onclick = flip;
     const cc = $('#cardClose', card); if (cc) cc.onclick = () => select(null);
     const cb = $('#calBtn', card); if (cb) cb.onclick = () => passToCalendar(o, o.next);
     const sc = $('#showerCal', card); if (sc) sc.onclick = () => { const f = o.kind === 'meteorhome' ? S.featObj : o; showerToCalendar(f); };
     const tm = $('#toMeteor', card); if (tm) tm.onclick = () => { S.feat = o.name; setView('meteor'); };
     const ca = $('#catchBtn', card); if (ca) ca.onclick = () => { S.autoCatch = !S.autoCatch; cardFor = null; toast(S.autoCatch ? 'Auto-catch on. Keep the phone still and the screen on.' : 'Auto-catch off.'); updateCard(simNow(), true); };
+    $$('[data-sat]', card).forEach(b => b.onclick = () => { const st = Sats.byId.get(+b.dataset.sat); if (!st) return; select(st); const v = st.v && satDir(st, simNow().getTime()); if (v && altOf(v) > 0 && S.mode === 'sky') { S.viewAz = azOf(v); S.viewAlt = clamp(altOf(v), -10, 85); } if (v && altOf(v) <= 0) toast((SPECIAL[st.id] || st.name) + ' is below your horizon right now. Its card shows the next visible pass.'); });
     $$('[data-probe]', card).forEach(b => b.onclick = () => { const pb = b.dataset.probe === 'JWST' ? JWST : PROBES.find(x => x.name === b.dataset.probe); select(pb); if (S.mode === 'sky' && pb.v) { S.viewAz = azOf(pb.v); S.viewAlt = clamp(altOf(pb.v), -10, 85); } });
     const rb = $('#remindBtn', card); if (rb) rb.onclick = () => addAlarm(o, o.next);
     const jb = $('#jumpBtn', card); if (jb) jb.onclick = () => {
       if (o.next && o.next !== 'none') { setOffset(o.next.maxT - Date.now()); computeSat(o, epochCtx(simNow())); toast('Previewing the pass at its highest point. Tap LIVE to return.'); }
       if (S.mode === 'sky' && o.v) { const v = satDir(o, simNow().getTime()); S.viewAz = azOf(v); S.viewAlt = clamp(altOf(v), -10, 85); }
     };
+  }
+
+  // Every object in the stations group: where it is now, or when it next rises above 10 degrees.
+  function stationRows(now) {
+    const list = Sats.list.filter(x => x.groups.has('stations')).sort((a, b) => (SPECIAL[b.id] ? 1 : 0) - (SPECIAL[a.id] ? 1 : 0) || a.name.localeCompare(b.name)).slice(0, 14);
+    return list.map(st => {
+      if (!st.v || st.jump !== S.jump) computeSat(st, epochCtx(now));
+      const v = st.v ? satDir(st, now.getTime()) : null, alt = v ? altOf(v) : -90, up = alt > 0;
+      if (!up && (st.riseFor == null || Math.abs(st.riseFor - now.getTime()) > 600e3) && !st.riseBusy) {
+        st.riseBusy = true; st.riseFor = now.getTime();
+        findPasses(st, now, 24, { max: 1 }).then(r => { st.rise = r[0] ? r[0].start : 0; st.riseBusy = false; cardFor = null; });
+      }
+      const where = up ? cardinal(azOf(v)) + ' ' + Math.round(alt) + '° UP' + (st.lit ? '' : ' · SHADOW') : st.rise ? 'RISES ' + tfmt(new Date(st.rise)).replace(' ', '') : st.rise === 0 ? 'NO PASS IN 24 H' : 'BELOW HORIZON';
+      return { s: st, name: SPECIAL[st.id] || st.name, up, where };
+    });
+  }
+  // Collapsed card: one line, or a sideways strip for the spacecraft list.
+  function compactFor(o, now) {
+    if (o.kind === 'stationhome') {
+      const rows = stationRows(now);
+      return rows.length ? `<div class="strip">${rows.map(r => `<button type="button" data-sat="${r.s.id}"><b>${esc(prettyName(r.name))}</b><span>${r.where}</span></button>`).join('')}</div>` : '<p class="muted" style="margin:0">Loading station data…</p>';
+    }
+    const close = '<button type="button" id="cardClose" aria-label="Close details">×</button>';
+    const line = (b, sp) => `<button type="button" class="mini"><b>${esc(b)}</b><span class="mono">${sp}</span></button>`;
+    const pos = v => v ? cardinal(azOf(v)) + ' ' + Math.round(altOf(v)) + '° UP' : '';
+    if (o.kind === 'deephome') {
+      const items = PROBES.concat([JWST]).map(p => { const a = p.v ? altOf(p.v) : -90; return `<button type="button" data-probe="${p.jwst ? 'JWST' : esc(p.name)}"><b>${esc(p.short || p.name)}</b><span>${p.jwst ? '1.5M KM' : (probeAU(p, now) * 0.1496).toFixed(1) + 'B KM'} · ${a > 0 ? pos(p.v) : 'BELOW'}</span></button>`; }).join('');
+      return `<div class="strip">${items}</div>`;
+    }
+    if (o.kind === 'meteorhome') {
+      const f = S.featObj; if (!f) return '';
+      const days = Math.round((f.peak - now) / 864e5), lst = gmst(now) + S.obs.lon * D2R, p0 = precess(f.ra, f.dec, now);
+      const transit = new Date(now.getTime() + wrap360((p0.ra - lst) * R2D) / 15 / 1.0027379 * 3600e3);
+      return line(f.name, (days > 0 ? 'PEAK IN ' + days + ' D' : 'PEAK NOW') + ' · BEST ' + tfmt(transit).replace(' ', '') + ' · RADIANT ' + Math.round(f.alt) + '°' + (S.autoCatch ? ' · CATCHING (' + S.caught + ')' : ''));
+    }
+    if (o.kind === 'sat') { const v = o.v ? satDir(o, now.getTime()) : null; return close + line(SPECIAL[o.id] || o.name, fmt(o.h) + ' KM · ' + (v && altOf(v) < 0 ? 'BELOW HORIZON' : o.lit ? 'MAG ' + o.mag.toFixed(1) + ' · ' + pos(v) : 'IN SHADOW · ' + pos(v))); }
+    if (o.kind === 'star') return close + line(o.name, 'MAG ' + o.mag.toFixed(1) + (o.ly ? ' · ' + fmt(o.ly) + ' LY' : '') + ' · ' + pos(o.v));
+    if (o.kind === 'dso') return close + line(dsoLabel(o), lyText(o.ly).toUpperCase() + ' · ' + seeWith(o) + ' · ' + pos(o.v));
+    if (o.kind === 'probe') return close + line(o.short || o.name, (o.jwst ? '1.5M KM' : (probeAU(o, now) * 0.1496).toFixed(1) + 'B KM') + ' · ' + (o.v && altOf(o.v) > 0 ? pos(o.v) : 'BELOW HORIZON'));
+    if (o.kind === 'shower') return close + line(o.name, 'PEAK ' + o.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase() + ' · ~' + o.zhr + '/HR');
+    return close + line(o.kind === 'moon' ? moonPhaseName(o.phase) : o.name, (o.mag != null && o.kind !== 'moon' ? 'MAG ' + o.mag.toFixed(1) + ' · ' : '') + pos(o.v));
   }
 
   // ---------- calendar reminders (work even when the app is closed) ----------
@@ -1616,7 +1676,7 @@
       S.preset = b.dataset.p;
       if (S.preset === 'starlink' && !Sats.status.starlink) { S.f.groups.starlink = true; loadGroup('starlink'); }
       if (S.preset === 'new' && !Sats.status['last-30-days']) { S.f.groups['last-30-days'] = true; loadGroup('last-30-days'); }
-      rebuildActive(); renderChips();
+      rebuildActive(); renderChips(); if (!S.sel) select(null);
       if (S.preset === 'visible') toast('Showing satellites bright enough to see by eye right now.');
     });
   }
@@ -1897,7 +1957,7 @@
     const c = document.createElement('canvas'); c.width = sky.width; c.height = sky.height;
     const x = c.getContext('2d');
     x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
-    if (S.mode === 'ar' && cam.videoWidth) {
+    if (S.mode === 'ar' && cam.videoWidth && !S.noFeed) {
       const vw = cam.videoWidth, vh = cam.videoHeight, sc = Math.max(c.width / vw, c.height / vh) * S.zoom, dw = vw * sc, dh = vh * sc;
       if (S.red) x.filter = 'grayscale(1) brightness(0.55)';
       x.drawImage(cam, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
@@ -1945,7 +2005,16 @@
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sky Watch' }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
     const a = document.createElement('a'); a.href = viewURL; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   };
-  $('#shutter').onclick = () => snapshot('').catch(e => toast('Snapshot failed: ' + e.message));
+  $('#snapBtn').onclick = () => { closeSheets(); setTimeout(() => snapshot('').then(buildGallery).catch(e => toast('Snapshot failed: ' + e.message)), 350); };
+  // clear view: only the sky and its labels
+  function setClear(on) {
+    S.clear = on; document.body.classList.toggle('clear', on); $('#clearBar').hidden = !on;
+    if (on) { select(null); $('#feedBtn').hidden = S.mode !== 'ar'; $('#feedBtn').textContent = S.noFeed ? 'Camera on' : 'Camera off'; }
+    zoneAt = 0;
+  }
+  $('#clearBtn').onclick = () => setClear(true);
+  $('#unclearBtn').onclick = () => setClear(false);
+  $('#feedBtn').onclick = () => { S.noFeed = !S.noFeed; cam.classList.toggle('nofeed', S.noFeed); $('#feedBtn').textContent = S.noFeed ? 'Camera on' : 'Camera off'; };
 
   // ---------- start ----------
   function showHUD() {
@@ -1964,7 +2033,7 @@
     startSensors();
     try { await startCamera(); }
     catch (e) { toast('Camera unavailable: ' + (e.message || e.name) + '. Using sky view.', 5000); return startSkyMode(); }
-    S.mode = 'ar'; document.body.classList.add('ar'); S.lastOrient = performance.now();
+    S.mode = 'ar'; document.body.classList.add('ar'); S.lastOrient = performance.now(); S.arStart = performance.now();
     showHUD(); requestGPS();
   };
   function startSkyMode() {
