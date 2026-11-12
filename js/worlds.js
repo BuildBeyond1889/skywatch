@@ -455,16 +455,17 @@ WORLDS.infra = (() => {
   // Find a station in radio-browser.info, the directory Lu Cube's radio search uses, so we can hand over the exact name to search.
   const RBH = ['de1.api.radio-browser.info', 'de2.api.radio-browser.info', 'fi1.api.radio-browser.info', 'nl1.api.radio-browser.info'];
   async function rbLookup(sn) {
-    const base = sn.call.split('-')[0].toUpperCase(), key = 'rb:' + sn.call;
+    const base = sn.call.split('-')[0].toUpperCase(), key = 'rb2:' + sn.call;
     const c = ls.get(key, null); if (c && Date.now() - c.t < 30 * 864e5) return c.r;
     let r = null;
     for (const h of RBH) {
       try {
-        const res = await fetch(`https://${h}/json/stations/search?name=${encodeURIComponent(base)}&countrycode=US&hidebroken=true&order=clickcount&reverse=true&limit=12`);
+        const res = await fetch(`https://${h}/json/stations/search?name=${encodeURIComponent(base)}&countrycode=US&hidebroken=true&order=clickcount&reverse=true&limit=30`);
         if (!res.ok) continue;
-        const list = await res.json(), word = new RegExp('(^|[^A-Z])' + base + '([^A-Z]|$)');
+        // keep only streams Lu Cube can play (it drops HLS and anything that isn't MP3/AAC), so a copied name always finds a station there
+        const list = (await res.json()).filter(x => { const u = (x.url_resolved || x.url || '').trim(), c = (x.codec || '').toUpperCase(); return /^https?:\/\//.test(u) && !(x.hls == 1 || x.hls === true) && ['MP3', 'AAC', 'AAC+'].includes(c) && (x.name || '').trim(); }), word = new RegExp('(^|[^A-Z])' + base + '([^A-Z]|$)');
         const hit = list.find(x => word.test((x.name || '').toUpperCase()) && (!sn.freq || sn.band !== 'FM' || !/\d{2,3}\.\d/.test(x.name) || (x.name || '').includes(String(sn.freq)))) || list.find(x => word.test((x.name || '').toUpperCase()));
-        r = hit ? { name: hit.name.trim(), state: hit.state || '' } : false; break;
+        r = hit ? { name: hit.name.replace(/\s+/g, ' ').trim().slice(0, 60), state: hit.state || '' } : false; break;
       } catch (e) { /* try the next server */ }
     }
     if (r !== null) ls.set(key, { t: Date.now(), r });
