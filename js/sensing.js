@@ -183,6 +183,7 @@
       const sc = d - h.pr * 4;
       if (sc < bd) { bd = sc; best = h; }
     }
+    if (best && best.o.tap) { best.o.tap(); return; }
     if (S.align) {
       if (best && (best.o.kind === 'star' || best.o.kind === 'planet' || best.o.kind === 'moon' || best.o.kind === 'sun')) doAlign(best.o);
       return;
