@@ -35,12 +35,13 @@ async function overpass(key, q, ttl) {
   if (c && Date.now() - c.t < ttl) return c.data;
   for (const base of OVERPASS) {
     try {
-      const r = await fetch(base + '?data=' + encodeURIComponent(q)); if (!r.ok) throw new Error(r.status);
-      const data = await r.json(); if (!data || !data.elements) throw new Error('bad');
+      const ac = new AbortController(), to = setTimeout(() => ac.abort(), 35000);
+      const r = await fetch(base + '?data=' + encodeURIComponent(q), { signal: ac.signal }).finally(() => clearTimeout(to)); if (!r.ok) throw new Error(r.status);
+      const data = await r.json(); if (!data || !data.elements || (data.remark && /error|timed out/i.test(data.remark) && !data.elements.length)) throw new Error('bad');
       idb.set(key, { t: Date.now(), data }); return data;
     } catch (e) { /* try the next mirror */ }
   }
-  return c ? c.data : null;
+  return c && c.data ? c.data : null;
 }
 function ecefDeltaToEnu(dx, dy, dz) { const o = S.obs; return [-o.sl * dx + o.cl * dy, -o.sp * o.cl * dx - o.sp * o.sl * dy + o.cp * dz, o.cp * o.cl * dx + o.cp * o.sl * dy + o.sp * dz]; }
 const viewFwd = () => VM ? [-VM[2], -VM[5], -VM[8]] : [0, 1, 0];
@@ -120,101 +121,110 @@ WORLDS.ground = (() => {
       st.stations = els.filter(e => e.type === 'node').map(e => ({ world: 'ground', kind: 'station', name: (e.tags && e.tags.name) || 'Subway station', lat: e.lat, lon: e.lon }));
     });
   }
-  // ---------- Peel the Earth: hover in space and look down at each layer in turn ----------
+  // ---------- Peel the Earth: stand on the ground and look down through each layer, to scale ----------
   const PEEL = [
-    { name: 'Crust', r: 6370, col: '#9a7650', hot: '#c79a68', depth: '0–35 km (7 km under oceans, up to 70 km under mountains)', temp: 'up to about 1,000 °C at its base', state: 'Solid rock', made: 'granite under continents, basalt under oceans', fact: 'Compared with the whole Earth it is thinner than an apple’s skin. Every mine, well and tunnel ever dug barely scratches it.' },
-    { name: 'Upper mantle', r: 6336, col: '#b4472a', hot: '#e0663a', depth: '35–660 km', temp: 'about 500–1,900 °C', state: 'Solid, but it creeps like very stiff putty', made: 'peridotite, rich in green olivine', fact: 'It flows a few centimetres a year. That slow churning drags the continents around and builds mountains.' },
-    { name: 'Lower mantle', r: 5711, col: '#c9602c', hot: '#f08a3c', depth: '660–2,890 km', temp: 'about 1,900–3,700 °C', state: 'Solid, squeezed by enormous pressure', made: 'bridgmanite, the most common mineral on Earth', fact: 'The biggest layer: more than half of Earth’s volume. The rock is so compressed that its crystals rearrange into forms that can’t exist at the surface.' },
-    { name: 'Outer core', r: 3480, col: '#e8862a', hot: '#ffc04d', depth: '2,890–5,150 km', temp: 'about 4,000–5,700 °C', state: 'Liquid metal', made: 'molten iron and nickel', fact: 'This ocean of liquid metal swirls as the Earth spins, and that motion generates Earth’s magnetic field, the one that makes compasses work and shields us from the solar wind.' },
-    { name: 'Inner core', r: 1220, col: '#ff9d2e', hot: '#ffe08a', depth: '5,150–6,371 km', temp: 'about 5,400 °C, as hot as the surface of the Sun', state: 'Solid metal ball', made: 'iron and nickel', fact: 'It is about 70% the size of the Moon. The pressure is so great that the iron stays solid despite the heat. It grows about a millimetre a year as the liquid around it freezes, and it spins slightly out of step with the rest of the planet.' }
+    { name: 'Crust', r: 6370, info: ['0–35 km down: 5–10 km under oceans, up to 70 km under mountains', 'Surface ~15 °C, ~1,000 °C at its base', 'Solid rock: granite under continents, basalt under oceans', 'About 1% of Earth’s volume. The deepest hole ever dug reached only 12 km'],  col: '#9a7650', hot: '#c79a68', depth: '0–35 km (7 km under oceans, up to 70 km under mountains)', temp: 'up to about 1,000 °C at its base', state: 'Solid rock', made: 'granite under continents, basalt under oceans', fact: 'Compared with the whole Earth it is thinner than an apple’s skin. Every mine, well and tunnel ever dug barely scratches it.' },
+    { name: 'Upper mantle', r: 6336, info: ['35–660 km down · 625 km thick', '~500 °C at the top, ~1,900 °C at the bottom', 'Solid peridotite (green olivine) that creeps a few cm a year; partly molten 100–200 km down', 'The tectonic plates ride on it · ~26% of Earth’s volume'],  col: '#b4472a', hot: '#e0663a', depth: '35–660 km', temp: 'about 500–1,900 °C', state: 'Solid, but it creeps like very stiff putty', made: 'peridotite, rich in green olivine', fact: 'It flows a few centimetres a year. That slow churning drags the continents around and builds mountains.' },
+    { name: 'Lower mantle', r: 5711, info: ['660–2,890 km down · 2,230 km thick', '~1,900 °C at the top, ~3,700 °C at the bottom', 'Solid bridgmanite: hot enough to melt, but up to 1.3 million atmospheres keep it solid', 'The biggest layer: ~56% of Earth’s volume'],  col: '#c9602c', hot: '#f08a3c', depth: '660–2,890 km', temp: 'about 1,900–3,700 °C', state: 'Solid, squeezed by enormous pressure', made: 'bridgmanite, the most common mineral on Earth', fact: 'The biggest layer: more than half of Earth’s volume. The rock is so compressed that its crystals rearrange into forms that can’t exist at the surface.' },
+    { name: 'Outer core', r: 3480, info: ['2,890–5,150 km down · 2,260 km thick', '~4,000 °C at the top, ~5,700 °C at the bottom', 'Liquid iron and nickel, churning as Earth spins', 'Its flow generates Earth’s magnetic field · ~16% of volume'],  col: '#e8862a', hot: '#ffc04d', depth: '2,890–5,150 km', temp: 'about 4,000–5,700 °C', state: 'Liquid metal', made: 'molten iron and nickel', fact: 'This ocean of liquid metal swirls as the Earth spins, and that motion generates Earth’s magnetic field, the one that makes compasses work and shields us from the solar wind.' },
+    { name: 'Inner core', r: 1220, info: ['5,150 km down to the centre at 6,371 km · 1,220 km radius', '~5,400 °C, about as hot as the Sun’s surface', 'Solid iron and nickel, squeezed by 3.6 million atmospheres', 'About 70% the Moon’s size; grows ~1 mm a year · 0.7% of volume'],  col: '#ff9d2e', hot: '#ffe08a', depth: '5,150–6,371 km', temp: 'about 5,400 °C, as hot as the surface of the Sun', state: 'Solid metal ball', made: 'iron and nickel', fact: 'It is about 70% the size of the Moon. The pressure is so great that the iron stays solid despite the heat. It grows about a millimetre a year as the liquid around it freezes, and it spins slightly out of step with the rest of the planet.' }
   ];
-  // Rough land areas (lat, lon, radius km) so the crust step looks like the real planet.
-  const LAND = [[45, -100, 1900], [58, -110, 1500], [62, -150, 900], [35, -85, 900], [20, -100, 800], [72, -42, 1000], [-10, -60, 1700], [-30, -63, 1100], [5, -68, 800], [10, 20, 2000], [22, 10, 1500], [-5, 25, 1300], [-22, 25, 1100], [8, 40, 800], [50, 15, 1100], [55, 40, 1500], [60, 90, 2200], [65, 130, 1500], [45, 75, 1500], [35, 105, 1700], [28, 80, 1000], [25, 45, 1000], [-25, 135, 1500], [-80, 0, 1800], [-80, 120, 1700], [-80, -110, 1500], [15, 100, 600], [0, 113, 600], [-6, 145, 500], [64, -18, 250], [54, -2, 350], [-43, 172, 350], [-19, 47, 400], [36, 138, 450], [12, 123, 300]];
-  const PEEL_H = 9000; // virtual height above the surface, km
-  function drawEarthBall(cx, cy, r, alpha) {
-    g.save(); g.globalAlpha = alpha;
-    // atmosphere
-    const atm = g.createRadialGradient(cx, cy, r * 0.96, cx, cy, r * 1.16);
-    atm.addColorStop(0, C('#7cc4ff', 0.55)); atm.addColorStop(0.4, C('#3a8ad8', 0.25)); atm.addColorStop(1, C('#3a8ad8', 0));
-    g.fillStyle = atm; g.beginPath(); g.arc(cx, cy, r * 1.16, 0, 6.283); g.fill();
-    g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.save(); g.clip();
-    g.fillStyle = C('#1f5fa8'); g.fillRect(cx - r, cy - r, 2 * r, 2 * r);
-    const p0 = S.obs.lat * D2R, l0 = (S.obs.lon + Date.now() / 400) * D2R, sp0 = Math.sin(p0), cp0 = Math.cos(p0);
-    const ortho = (la, lo) => { const p = la * D2R, l = lo * D2R, c = sp0 * Math.sin(p) + cp0 * Math.cos(p) * Math.cos(l - l0); return { x: cx + r * Math.cos(p) * Math.sin(l - l0), y: cy - r * (cp0 * Math.sin(p) - sp0 * Math.cos(p) * Math.cos(l - l0)), c }; };
-    for (const [la, lo, km] of LAND) {
-      const q = ortho(la, lo); if (q.c < -0.15) continue;
-      const rr = r * km / 6371 * (0.55 + 0.45 * Math.max(q.c, 0));
-      const gr = g.createRadialGradient(q.x, q.y, 0, q.x, q.y, rr);
-      const col = Math.abs(la) > 70 ? '#eef4ff' : Math.abs(la) < 30 && (lo > -20 && lo < 60) && la > 12 ? '#c8ad6a' : '#3f9a45';
-      gr.addColorStop(0, C(col, 0.95)); gr.addColorStop(0.7, C(col, 0.85)); gr.addColorStop(1, C(col, 0));
-      g.fillStyle = gr; g.beginPath(); g.arc(q.x, q.y, rr, 0, 6.283); g.fill();
+  // Seen from where you stand: each layer is a sphere around Earth's centre 6,371 km below your feet,
+  // so it fills the directions within asin(r / 6371) of straight down. That makes the real scale obvious:
+  // the crust is a thin band just under the horizon, the inner core a small disc right below you.
+  const topR = i => i === 0 ? 6371 : PEEL[i].r;
+  const capAlt = i => i === 0 ? -0.3 : -(90 - Math.asin(topR(i) / 6371) * R2D);
+  // Screen polygon for all directions below (alt < 0) or above (alt > 0) a constant altitude, clipped at the camera plane.
+  function capPath(alt) {
+    const P = [], E = 1e-4, out = [];
+    for (let az = 0; az < 360; az += 4) P.push(project(vecAA(az, alt)));
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length], ai = a.d > E, bi = b.d > E;
+      if (ai) out.push(a);
+      if (ai !== bi) { const k = (E - a.d) / (b.d - a.d); out.push({ cx: a.cx + k * (b.cx - a.cx), cy: a.cy + k * (b.cy - a.cy), d: E }); }
     }
-    // clouds drifting a little faster than the ground
-    for (let k = 0; k < 26; k++) { const la = Math.sin(k * 12.9898) * 70, lo = (k * 47 + Date.now() / 260) % 360; const q = ortho(la, lo); if (q.c < 0) continue; g.fillStyle = C('#ffffff', 0.25 * q.c); g.beginPath(); g.ellipse(q.x, q.y, r * 0.09 * (0.5 + q.c), r * 0.035, 0.3, 0, 6.283); g.fill(); }
-    // night side shading and limb darkening
-    const sh = g.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.2, cx, cy, r * 1.02);
-    sh.addColorStop(0, 'rgba(255,255,255,0.08)'); sh.addColorStop(0.75, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(0,0,0,0.55)');
-    g.fillStyle = sh; g.fillRect(cx - r, cy - r, 2 * r, 2 * r);
-    g.restore(); g.restore();
+    if (out.length < 3) return false;
+    g.beginPath(); out.forEach((q, i) => { const x = W / 2 + FOC * q.cx / q.d, y = H / 2 - FOC * q.cy / q.d; i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath();
+    return true;
   }
-  function drawLayerBall(L, cx, cy, r, alpha, fast) {
-    g.save(); g.globalAlpha = alpha;
-    g.fillStyle = C(L.hot, 0.16); g.beginPath(); g.arc(cx, cy, r * 1.3, 0, 6.283); g.fill();
-    const gr = g.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.05, cx, cy, r);
-    gr.addColorStop(0, C(L.hot)); gr.addColorStop(0.7, C(L.col)); gr.addColorStop(1, C('#2a0e04'));
-    g.fillStyle = gr; g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.fill();
-    g.save(); g.clip();
-    const spin = Date.now() / (fast ? 900 : 2600);
-    for (let k = 0; k < 8; k++) { const ph = spin + k * Math.PI / 8, rx = Math.abs(Math.cos(ph)) * r; g.strokeStyle = C('#2a0e04', Math.sin(ph) > 0 ? 0.35 : 0.12); g.lineWidth = 1.2; g.beginPath(); g.ellipse(cx, cy, Math.max(rx, 0.5), r, 0, 0, 6.283); g.stroke(); }
-    for (const lat of [-0.6, -0.3, 0, 0.3, 0.6]) { g.strokeStyle = C('#2a0e04', 0.2); g.beginPath(); g.ellipse(cx, cy + lat * r, r * Math.sqrt(1 - lat * lat), r * 0.18 * Math.sqrt(1 - lat * lat), 0, 0, 6.283); g.stroke(); }
-    // molten shimmer
-    for (let k = 0; k < 10; k++) { const a = spin * 1.7 + k * 0.63, rr = r * (0.2 + 0.6 * ((k * 0.37) % 1)); g.fillStyle = C(L.hot, 0.12); g.beginPath(); g.arc(cx + Math.cos(a) * rr * 0.6, cy + Math.sin(a * 1.3) * rr * 0.5, r * 0.18, 0, 6.283); g.fill(); }
-    g.restore(); g.restore();
+  function ring(alt, col, w, dash) {
+    g.strokeStyle = col; g.lineWidth = w; g.setLineDash(dash || []); g.beginPath(); let pen = false;
+    for (let az = 0; az <= 360; az += 3) { const p = project(vecAA(az, alt)); if (p.ok && Math.abs(p.x) < 4 * W && Math.abs(p.y) < 4 * H) { pen ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); pen = true; } else pen = false; }
+    g.stroke(); g.setLineDash([]);
   }
-  function callout(L, cx, cy, r) {
-    const bw = 196, bh = 74, side = cx < W / 2 ? 1 : -1;
-    let bx = side > 0 ? cx + r * 0.75 + 24 : cx - r * 0.75 - 24 - bw, by = cy - r * 0.75 - bh;
-    bx = clamp(bx, 8, W - bw - 8); by = clamp(by, ZONE.top + 4, Math.max(ZONE.top + 4, ZONE.bot - bh - 4));
-    const ax = cx + side * r * 0.7, ay = cy - r * 0.7;
-    g.strokeStyle = C(L.hot, 0.8); g.lineWidth = 1.2; g.beginPath(); g.moveTo(ax, ay); g.lineTo(side > 0 ? bx : bx + bw, by + bh / 2); g.stroke();
-    g.fillStyle = C(L.hot); g.beginPath(); g.arc(ax, ay, 3, 0, 6.283); g.fill();
-    g.fillStyle = C('#05070f', 0.82); roundRect(bx, by, bw, bh, 10); g.fill(); g.strokeStyle = C(L.hot, 0.6); roundRect(bx, by, bw, bh, 10); g.stroke();
-    g.textBaseline = 'top'; g.fillStyle = C('#ffffff'); g.font = '700 14px "Space Grotesk", Inter, sans-serif'; g.fillText(L.name, bx + 12, by + 9);
-    g.font = MONO; g.fillStyle = C(L.hot);
-    g.fillText(L.depth.split(' (')[0].toUpperCase() + ' DOWN', bx + 12, by + 29);
-    g.fillText(L.temp.replace(/,? as hot.*| at its base/, '').replace('up to about', 'UP TO').replace('about', '~').toUpperCase(), bx + 12, by + 42);
-    g.fillText(L.state.split(',')[0].toUpperCase(), bx + 12, by + 55);
+  function fillLayer(i, alpha) {
+    if (alpha <= 0.01 || !capPath(capAlt(i))) return;
+    g.save(); g.globalAlpha = alpha; g.clip();
+    const nd = project([0, 0, -1]), cx = nd.ok ? nd.x : W / 2, cy = nd.ok ? nd.y : H * 2;
+    if (i === 0) { // grassland surface, darker towards your feet
+      g.fillStyle = C('#4f9a45'); g.fillRect(0, 0, W, H);
+      for (const [a, c] of [[-8, 0.12], [-20, 0.12], [-40, 0.12], [-65, 0.12]]) if (capPath(a)) { g.fillStyle = C('#1d4a22', c); g.fill(); }
+      g.strokeStyle = C('#d8f5c8', 0.12); g.lineWidth = 1;
+      for (let az = 0; az < 360; az += 20) { g.beginPath(); let pen = false; for (let al = -1; al >= -89; al -= 4) { const p = project(vecAA(az, al)); if (p.ok) { pen ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); pen = true; } else pen = false; } g.stroke(); }
+      for (const al of [-3, -8, -15, -30, -60]) ring(al, C('#d8f5c8', 0.1), 1);
+    } else {
+      const L = PEEL[i], rr = Math.hypot(W, H) * (i >= 3 ? 0.7 : 1.4);
+      const gr = g.createRadialGradient(cx, cy, 0, cx, cy, rr); gr.addColorStop(0, C(L.hot)); gr.addColorStop(0.6, C(L.col)); gr.addColorStop(1, C('#2a0e04'));
+      g.fillStyle = gr; g.fillRect(0, 0, W, H);
+      // slow convection / spin texture
+      const spin = Date.now() / (i === 4 ? 900 : 3000);
+      for (let k = 0; k < 14; k++) { const a = spin + k * 0.45, rad = (60 + k * 37) % rr; g.fillStyle = C(L.hot, 0.1); g.beginPath(); g.arc(cx + Math.cos(a) * rad, cy + Math.sin(a * 1.2) * rad * 0.6, 40 + (k % 4) * 18, 0, 6.283); g.fill(); }
+      if (i >= 3 && nd.ok) {
+        const rpx = Math.abs(project(vecAA(azOf(viewFwd()), capAlt(i))).y - cy) || 80;
+        for (let k = 0; k < 8; k++) { const ph = spin + k * Math.PI / 8; g.strokeStyle = C('#2a0e04', Math.sin(ph) > 0 ? 0.3 : 0.1); g.lineWidth = 1.2; g.beginPath(); g.ellipse(cx, cy, Math.max(Math.abs(Math.cos(ph)) * rpx, 0.5), rpx, 0, 0, 6.283); g.stroke(); }
+      }
+    }
+    g.restore();
+  }
+  function wrapText(txt, maxW) {
+    const words = txt.split(' '), lines = []; let cur = '';
+    for (const w of words) { const t = cur ? cur + ' ' + w : w; if (g.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+    if (cur) lines.push(cur); return lines;
+  }
+  function callout(i, ax, ay) {
+    const L = PEEL[i], bw = Math.min(W - 24, 330), pad = 12;
+    g.font = '500 12px Inter, system-ui, sans-serif';
+    const rows = []; L.info.forEach((t, k) => wrapText(t, bw - pad * 2 - 12).forEach((ln, j) => rows.push([ln, k, j])));
+    const bh = 34 + rows.length * 16 + 8, bx = (W - bw) / 2, by = Math.max(ZONE.top + 8, ZONE.bot - bh - 10);
+    if (ax != null && (ay < by - 10 || ay > by + bh + 10)) { g.strokeStyle = C(L.hot, 0.8); g.lineWidth = 1.2; g.beginPath(); g.moveTo(clamp(ax, bx + 20, bx + bw - 20), ay < by ? by : by + bh); g.lineTo(ax, ay); g.stroke(); g.fillStyle = C(L.hot); g.beginPath(); g.arc(ax, ay, 3.5, 0, 6.283); g.fill(); }
+    g.fillStyle = C('#05070f', 0.84); roundRect(bx, by, bw, bh, 12); g.fill(); g.strokeStyle = C(L.hot, 0.55); g.lineWidth = 1; roundRect(bx, by, bw, bh, 12); g.stroke();
+    g.textBaseline = 'top';
+    g.fillStyle = C('#ffffff'); g.font = '700 15px "Space Grotesk", Inter, sans-serif'; g.fillText(L.name, bx + pad, by + 10);
+    g.font = MONO; g.fillStyle = C(L.hot); g.textAlign = 'right'; g.fillText('LAYER ' + (i + 1) + ' OF 5', bx + bw - pad, by + 13); g.textAlign = 'left';
+    g.font = '500 12px Inter, system-ui, sans-serif';
+    rows.forEach(([ln, k, j], n) => { const y = by + 34 + n * 16; if (j === 0) { g.fillStyle = C(L.hot); g.beginPath(); g.arc(bx + pad + 3, y + 7, 2.2, 0, 6.283); g.fill(); } g.fillStyle = C('#e6ecff', k === 0 ? 1 : 0.86); g.fillText(ln, bx + pad + 12, y); });
     g.textBaseline = 'alphabetic';
+    return by + bh;
   }
   function drawPeel(t) {
-    // empty space all round: stars below the horizon too, because you are high above the planet
-    g.fillStyle = C('#010208'); g.fillRect(0, 0, W, H);
-    for (const s of STARS) { if (!s.v) continue; const p = project(s.v); if (!onScreen(p, 4)) continue; g.fillStyle = C(s.col, 0.85); g.beginPath(); g.arc(p.x, p.y, clamp(2.8 - 0.55 * s.mag, 0.8, 3.8), 0, 6.283); g.fill(); }
-    const nad = project([0, 0, -1]);
-    if (!nad.ok || !onScreen(nad, W * 0.6)) {
-      g.font = '600 15px Inter, sans-serif'; g.fillStyle = C('#ffffff'); g.textAlign = 'center';
-      g.fillText('Look straight down', W / 2, H / 2 - 10); g.font = MONO; g.fillStyle = C('#93a3c9'); g.fillText('THE PLANET IS BELOW YOUR FEET', W / 2, H / 2 + 10); g.textAlign = 'left';
-      return;
+    const step = st.peel || 0, k = clamp((performance.now() - (st.peelAt || 0)) / 700, 0, 1), ease = 1 - Math.pow(1 - k, 3);
+    // sky above: deep blue overhead, paler at the horizon
+    g.fillStyle = C('#5d95d0'); g.fillRect(0, 0, W, H);
+    for (let a = 2; a < 90; a += 4) if (capPath(a)) { g.fillStyle = C('#0b2350', 0.075); g.fill(); }
+    // layers already peeled: see-through bands so you can see how thin or thick they are
+    for (let i = 0; i < step; i++) if (capPath(capAlt(i))) { g.fillStyle = C(i === 0 ? '#7a5a3a' : PEEL[i].col, i === 0 ? 0.35 : 0.22); g.fill(); }
+    // the layer you're looking at, fading in when you go back up
+    fillLayer(step, st.prevPeel != null && st.prevPeel > step ? ease : 1);
+    // the layer you just peeled, fading away
+    if (st.prevPeel != null && st.prevPeel < step && k < 1) fillLayer(st.prevPeel, 1 - ease);
+    // every boundary drawn to scale, with its depth where you're facing
+    const vaz = azOf(viewFwd());
+    for (let i = 0; i < PEEL.length; i++) {
+      const al = capAlt(i), L = PEEL[i], below = i > step;
+      if (i > 0) ring(al, C(L.hot, below ? 0.35 : 0.85), below ? 1 : 1.5, below ? [5, 6] : null);
+      const p = project(vecAA(vaz, al)); if (!onScreen(p, -10)) continue;
+      const depth = i === 0 ? 'SURFACE' : L.depth.split(' ')[0].split('–')[0] + ' KM DOWN';
+      label(st.placed, p.x, p.y, 0, i === 0 ? 'Horizon · ground level' : 'Top of the ' + L.name.toLowerCase(), depth + ' · ' + Math.abs(al).toFixed(1) + '° BELOW HORIZON', C('#ffffff', below ? 0.7 : 1), C(i === 0 ? '#d8f5c8' : L.hot), i === step ? 9 : 4, i === step);
     }
-    const step = st.peel || 0, k = clamp((performance.now() - (st.peelAt || 0)) / 900, 0, 1), ease = 1 - Math.pow(1 - k, 3);
-    // zoom so the current layer fills the view: peeling dives you deeper, going back pulls you out
-    const fit = i => (i === 0 ? 0.36 : 0.3) * Math.min(W, H) / PEEL[i].r, from = st.prevPeel != null ? fit(st.prevPeel) : fit(step);
-    const sc = Math.exp(Math.log(from) + (Math.log(fit(step)) - Math.log(from)) * ease), R = r => r * sc, cx = nad.x, cy = nad.y;
-    // see-through shells of the layers already peeled
-    for (let i = 0; i < step; i++) {
-      const L = PEEL[i], r = R(L.r);
-      g.strokeStyle = C(i === 0 ? '#7cc4ff' : L.hot, 0.4); g.lineWidth = 1.2; g.setLineDash([5, 6]); g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.stroke(); g.setLineDash([]);
-      g.fillStyle = C(i === 0 ? '#3a8ad8' : L.col, 0.035); g.fill();
-      const lx = cx + r * 0.72, ly = cy + r * 0.69; if (lx > 8 && lx < W - 60 && ly > ZONE.top && ly < ZONE.bot) { g.font = MONO; g.fillStyle = C(i === 0 ? '#9fd0ff' : L.hot, 0.8); g.fillText(L.name.toUpperCase(), lx + 4, ly + 10); }
+    ring(0, C('#eaf4ff', 0.6), 1.2);
+    // the info box, pointing at the layer under your feet
+    const nd = project([0, 0, -1]); let ax = null, ay = null;
+    if (onScreen(nd, -20)) { ax = nd.x; ay = nd.y; } else { const p = project(vecAA(vaz, (capAlt(step) - 90) / 2)); if (onScreen(p, -20)) { ax = p.x; ay = p.y; } }
+    callout(step, ax, ay);
+    if (altOf(viewFwd()) > -5) {
+      g.font = '600 14px Inter, sans-serif'; g.fillStyle = C('#ffffff'); g.textAlign = 'center';
+      g.fillText('↓ Look down: the layers are under your feet, to scale', W / 2, ZONE.top + 24); g.textAlign = 'left';
     }
-    // the layer just peeled away grows and fades out
-    if (st.prevPeel != null && st.prevPeel < step && k < 1) {
-      const P = PEEL[st.prevPeel], r = R(P.r);
-      if (st.prevPeel === 0) drawEarthBall(cx, cy, r, 1 - ease); else drawLayerBall(P, cx, cy, r, 1 - ease, false);
-    }
-    const L = PEEL[step], r = R(L.r), fade = st.prevPeel != null && st.prevPeel < step ? ease : 1;
-    if (step === 0) drawEarthBall(cx, cy, r, fade); else drawLayerBall(L, cx, cy, r, fade, step === PEEL.length - 1);
-    callout(L, cx, cy, r);
   }
   function peelHome() {
     const L = PEEL[st.peel || 0];
@@ -224,7 +234,7 @@ WORLDS.ground = (() => {
       <div class="card-foot"><span>${esc(L.fact)}</span></div>`;
   }
   function draw(now, placed, t, ar) {
-    if (wchip('ground') === 'peel') { drawPeel(t); return; }
+    if (wchip('ground') === 'peel') { st.placed = placed; drawPeel(t); return; }
     // a faint see-through Earth below the horizon
     if (!ar || S.noFeed) {
       const hz = project(vecAA(azOf(viewFwd()), 0));
@@ -340,9 +350,9 @@ WORLDS.ground = (() => {
   return {
     id: 'ground', name: 'Ground X-ray', sub: 'Earthquakes, cities and rock through the planet', below: true, icon: '<path d="M3 9h18M5 14h14M8 19h8"/><circle cx="12" cy="5" r="2"/>',
     start: load, stop() { if (st.peelFeed) { st.peelFeed = false; S.noFeed = false; cam.classList.remove('nofeed'); } }, draw, home, homeCompact, card, compact,
-    wireHome(card) { $$('#peelSeg button', card).forEach(b => b.onclick = e => { e.stopPropagation(); const n = +b.dataset.i; if (n === st.peel) return; st.prevPeel = st.peel; st.peel = n; st.peelAt = performance.now(); cardFor = null; updateCard(simNow(), true); try { navigator.vibrate && navigator.vibrate(15); } catch (er) { /* ignore */ } }); },
+    wireHome(card) { $$('#peelSeg button', card).forEach(b => b.onclick = e => { e.stopPropagation(); const n = +b.dataset.i; if (n === st.peel) return; st.prevPeel = st.peel; st.peel = n; st.peelAt = performance.now(); if (S.mode === 'sky') S.viewAlt = [-25, -25, -45, -70, -86][n]; cardFor = null; updateCard(simNow(), true); try { navigator.vibrate && navigator.vibrate(15); } catch (er) { /* ignore */ } }); },
     onChip(id) {
-      if (id === 'peel') { st.peel = st.peel || 0; if (!S.noFeed) { st.peelFeed = true; S.noFeed = true; cam.classList.add('nofeed'); } S.collapse.worldhome = true; if (S.mode === 'sky') S.viewAlt = -89; toast('Peel the Earth: you’re floating in space. Look straight down.'); }
+      if (id === 'peel') { st.peel = st.peel || 0; if (!S.noFeed) { st.peelFeed = true; S.noFeed = true; cam.classList.add('nofeed'); } S.collapse.worldhome = true; if (S.mode === 'sky') S.viewAlt = -25; toast('Peel the Earth: every layer under your feet, drawn to scale. Tap a layer to peel.'); }
       else if (st.peelFeed) { st.peelFeed = false; S.noFeed = false; cam.classList.remove('nofeed'); }
       cardFor = null;
     },
@@ -372,21 +382,19 @@ WORLDS.infra = (() => {
     if (st.loadedFor === key && !force) return; st.loadedFor = key;
     st.towers = []; st.power = []; st.subs = []; st.dcs = [];
     const L = S.obs.lat, N = S.obs.lon, tag = '["man_made"~"^(mast|tower|communications_tower)$"]';
-    // 1. broadcast and tall radio towers out to about 100 miles
+    const bb = km => { const dl = km / 111, dn = km / (111 * Math.max(Math.cos(L * D2R), 0.2)); return [(L - dl).toFixed(3), (N - dn).toFixed(3), (L + dl).toFixed(3), (N + dn).toFixed(3)].join(','); };
+    const towersDone = (j, near, which) => { st.status[which] = j ? 'ok' : 'error'; for (const e of (j && j.elements) || []) { const t = e.tags || {}; if (/data_center|exchange/.test(t.telecom || '')) { const c = centerOf(e); if (c) st.dcs.push({ world: 'infra', kind: 'dc', name: t.name || (t.telecom === 'exchange' ? 'Telephone exchange' : 'Data centre'), op: t.operator || '', lat: c[0], lon: c[1] }); } else addTower(e, near); } st.towers.sort((a, b) => a.dist - b.dist); cardFor = null; };
+    // 1. TV, radio and other big towers out to about 100 miles (a bounding box is much faster for the map server than a radius)
     st.status.far = 'loading'; cardFor = null;
-    overpass('infraFar:' + key, `[out:json][timeout:60];(node(around:160000,${L},${N})${tag}["tower:type"~"broadcast|radio|television"];node(around:160000,${L},${N})${tag}["communication:television"];node(around:160000,${L},${N})${tag}["communication:radio"];node(around:160000,${L},${N})["man_made"="communications_tower"];node(around:160000,${L},${N})${tag}["height"~"^[1-9][0-9][0-9]"];way(around:160000,${L},${N})["man_made"="communications_tower"];);out center 700;`, 14 * 864e5)
-      .then(j => { st.status.far = j ? 'ok' : 'error'; for (const e of (j && j.elements) || []) addTower(e, false); st.towers.sort((a, b) => a.dist - b.dist); cardFor = null; });
-    // 2. cell masts nearby
+    overpass('infraFar2:' + key, `[out:json][timeout:30][bbox:${bb(160)}];(nwr["man_made"~"^(mast|tower)$"]["tower:type"~"broadcast|radio|television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:radio"];nwr["man_made"="communications_tower"];nwr["man_made"="mast"]["height"~"^([1-9][0-9][0-9]|[6-9][0-9])"];);out center tags 600;`, 14 * 864e5)
+      .then(j => towersDone(j, false, 'far'));
+    // 2. every mapped mast and communication tower within about 15 miles, plus data centres
     st.status.near = 'loading';
-    overpass('infraNear:' + key, `[out:json][timeout:40];(node(around:15000,${L},${N})${tag}["tower:type"="communication"];node(around:15000,${L},${N})${tag}["communication:mobile_phone"];node(around:15000,${L},${N})["telecom"~"data_center|exchange"];way(around:30000,${L},${N})["telecom"="data_center"];);out center 400;`, 7 * 864e5)
-      .then(j => {
-        st.status.near = j ? 'ok' : 'error';
-        for (const e of (j && j.elements) || []) { const t = e.tags || {}, c = centerOf(e); if (!c) continue; if (/data_center|exchange/.test(t.telecom || '')) st.dcs.push({ world: 'infra', kind: 'dc', name: t.name || (t.telecom === 'exchange' ? 'Telephone exchange' : 'Data centre'), op: t.operator || '', lat: c[0], lon: c[1] }); else addTower(e, true); }
-        st.towers.sort((a, b) => a.dist - b.dist); cardFor = null;
-      });
+    overpass('infraNear2:' + key, `[out:json][timeout:25][bbox:${bb(25)}];(nwr["man_made"="mast"];nwr["man_made"="tower"]["tower:type"~"communication|broadcast"];nwr["man_made"="communications_tower"];nwr["telecom"~"data_center|exchange"];);out center tags 500;`, 7 * 864e5)
+      .then(j => towersDone(j, true, 'near'));
     // 3. the power grid: transmission lines and substations
     st.status.power = 'loading';
-    overpass('infraPower:' + key, `[out:json][timeout:60];(way(around:25000,${L},${N})["power"="line"];way(around:4000,${L},${N})["power"="minor_line"];node(around:20000,${L},${N})["power"="substation"];way(around:20000,${L},${N})["power"="substation"];node(around:40000,${L},${N})["power"="plant"];way(around:40000,${L},${N})["power"="plant"];);out geom 900;`, 14 * 864e5)
+    overpass('infraPower2:' + key, `[out:json][timeout:30][bbox:${bb(25)}];(way["power"="line"];way["power"="substation"];node["power"="substation"];way["power"="plant"]["plant:output:electricity"];);out geom 900;`, 14 * 864e5)
       .then(j => {
         st.status.power = j ? 'ok' : 'error';
         for (const e of (j && j.elements) || []) {
@@ -485,14 +493,14 @@ WORLDS.infra = (() => {
       const tw = st.towers.filter(x => x.type !== 'Cell / radio mast').slice(0, 8), cells = st.towers.filter(x => x.type === 'Cell / radio mast').length;
       const rows = tw.map((x, i) => { const v = geoEnu(x.lat, x.lon, x.h / 1000); return `<button type="button" class="srch-row" data-tw="${st.towers.indexOf(x)}"><span>${esc(x.name)}</span><span>${kmTxt(x.dist)} ${cardinal(azOf(v))}${altOf(v) < -0.05 ? ' · BEYOND HORIZON' : ''}</span></button>`; }).join('');
       return `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">Nearest radio and TV towers</div><div class="card-sub mono">WITHIN ~100 MILES · ${cells} CELL MASTS NEARBY · ${st.power.length} POWER LINES · ${st.subs.length} SUBSTATIONS/PLANTS</div></div></div>
-        <div class="srch">${rows || `<p class="muted" style="margin:0">${busy ? 'Loading map data… big areas can take up to a minute.' : 'No broadcast towers are mapped near you.'}</p>`}</div>
+        <div class="srch">${rows || `<p class="muted" style="margin:0">${busy ? 'Loading map data… this can take up to a minute the first time.' : 'No broadcast towers are mapped near you.'}</p>`}</div>
         ${bad ? '<div class="card-actions"><button type="button" class="btn small" id="infraRetry">Map service busy. Try again</button></div>' : ''}
         <span class="muted" style="font-size:11px">Map data © OpenStreetMap contributors. Only mapped structures appear.</span>`;
     },
     homeCompact() { const tw = st.towers.find(x => x.type !== 'Cell / radio mast'); return `<button type="button" class="mini"><b>${st.towers.length} towers</b><span class="mono">${tw ? 'NEAREST BROADCAST ' + kmTxt(tw.dist) : Object.values(st.status).includes('loading') ? 'LOADING MAP DATA…' : 'TAP FOR DETAILS'}</span></button>`; },
     wireHome(card) {
       $$('[data-tw]', card).forEach(b => b.onclick = () => { const x = st.towers[+b.dataset.tw]; if (!x) return; x.v = geoEnu(x.lat, x.lon, x.h / 1000); select(x); if (S.mode === 'sky') { S.viewAz = azOf(x.v); S.viewAlt = 2; S.zoom = 3; } });
-      const r = $('#infraRetry', card); if (r) r.onclick = () => { idb.set('infraFar:' + st.loadedFor, null); load(true); };
+      const r = $('#infraRetry', card); if (r) r.onclick = () => { for (const kk of ['infraFar2:', 'infraNear2:', 'infraPower2:']) idb.set(kk + st.loadedFor, null); load(true); };
     },
     chips: [['all', 'Everything'], ['space', 'Satellites'], ['towers', 'Towers'], ['power', 'Power grid']],
     hud: () => '<b>' + st.towers.length + '</b> TOWERS · <b>' + st.power.length + '</b> LINES', below: true,
@@ -738,11 +746,14 @@ WORLDS.mag = (() => {
         pts.push(ecefDeltaToEnu(e[0] - S.obs.x, e[1] - S.obs.y, e[2] - S.obs.z));
       }
       lines.push({ L, phi: phiDeg, pts, main, apex: pts[60], top: (L - 1) * 6371 });
+      if (main) st.L0 = L - 1;
     };
-    add(L0, 0, true);
-    for (const d of [-36, -24, -12, 12, 24, 36]) add(L0, d, false);
-    for (const dL of [-0.7, -0.35, 0.5, 1.1, 2, 3.5, 6]) if (L0 + dL > 1.08) add(L0 + dL, 0, false);
-    st.lines = lines; st.linesFor = key; st.L0 = L0;
+    // lines that rise over your sky and loop out into space (the line through your own feet just dives into the ground)
+    add(L0 + 1, 0, true);
+    for (const d of [-50, -35, -20, -10, 10, 20, 35, 50]) { add(L0 + 1, d, false); add(L0 + 3, d, false); }
+    for (const d of [-25, 25]) add(L0 + 0.5, d, false);
+    add(L0 + 6, 0, false);
+    st.lines = lines; st.linesFor = key;
     return lines;
   }
   function fieldHere() { return GEOMAG.field(S.obs.lat, S.obs.lon, 0, simNow()); }
@@ -754,17 +765,16 @@ WORLDS.mag = (() => {
     for (const ln of fieldLines()) {
       let prev = null, prevUp = false;
       for (const v of ln.pts) {
-        const p = project(v), up = altOf(v) > -0.3;
-        if (prev && p.ok && prev.ok && Math.abs(p.x - prev.x) < W * 2 && Math.abs(p.y - prev.y) < H * 2) {
-          const vis = up && prevUp;
-          g.strokeStyle = C('#7cf2d8', vis ? (ln.main ? 0.85 : 0.45) : 0.14); g.lineWidth = vis ? (ln.main ? 2.4 : 1.4) : 1;
-          g.setLineDash(vis ? [16, 10] : [3, 7]); g.lineDashOffset = vis ? flow : 0;
+        const p = project(v), up = altOf(v) > 0;
+        if (prev && up && prevUp && p.ok && prev.ok && Math.abs(p.x - prev.x) < W * 2 && Math.abs(p.y - prev.y) < H * 2) {
+          g.strokeStyle = C('#7cf2d8', ln.main ? 0.85 : 0.45); g.lineWidth = ln.main ? 2.4 : 1.4;
+          g.setLineDash([16, 10]); g.lineDashOffset = flow;
           g.beginPath(); g.moveTo(prev.x, prev.y); g.lineTo(p.x, p.y); g.stroke();
         }
         prev = p; prevUp = up;
       }
       g.setLineDash([]); g.lineDashOffset = 0;
-      if (ln.main) { const pa = project(ln.apex); if (onScreen(pa, 0) && altOf(ln.apex) > 0) label(placed, pa.x, pa.y, 6, 'Your field line', 'PEAKS ' + kmTxt(ln.top) + ' ABOVE THE EQUATOR', C('#ffffff'), C('#7cf2d8'), 6, true); }
+      if (ln.main) { const pa = project(ln.apex); if (onScreen(pa, 0) && altOf(ln.apex) > 0) label(placed, pa.x, pa.y, 6, 'Earth’s field line', 'LOOPS ' + kmTxt(ln.top) + ' ABOVE THE EQUATOR', C('#ffffff'), C('#7cf2d8'), 6, true); }
     }
     // streaming field lines: short segments drifting along the field direction
     const real = Date.now();
@@ -802,7 +812,7 @@ WORLDS.mag = (() => {
     return `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">Earth’s magnetic field here</div><div class="card-sub mono">IGRF MODEL · ${Math.abs(S.obs.lat).toFixed(1)}°${S.obs.lat >= 0 ? 'N' : 'S'} ${Math.abs(S.obs.lon).toFixed(1)}°${S.obs.lon >= 0 ? 'E' : 'W'}</div></div></div>
       <div class="stats">${stat('DECL', Math.abs(f.decl).toFixed(1) + '° ' + (f.decl < 0 ? 'W' : 'E'))}${stat('DIP', Math.abs(f.incl).toFixed(1), '°')}${stat('STRENGTH', fmt(Math.round(f.F)), 'nT')}${stat('HORIZ', fmt(Math.round(f.H)), 'nT')}</div>
       <div class="card-foot"><span>A compass here points ${Math.abs(f.decl).toFixed(1)}° ${f.decl < 0 ? 'west' : 'east'} of true north, and a free-swinging needle would tilt ${Math.abs(f.incl).toFixed(0)}° ${f.incl > 0 ? 'down' : 'up'}. The field is about ${Math.round(f.F / 1000)} microtesla: roughly a hundred times weaker than a fridge magnet.</span></div>
-      <div class="card-foot"><span>The long dashed loops are Earth’s field lines: they leave the planet in the southern hemisphere, arc out into space and dive back in up north. Yours reaches ${kmTxt(((st.L0 || 3) - 1) * 6371)} above the equator; the dashes flow the way the field points. Faint parts are behind the Earth.</span></div>
+      <div class="card-foot"><span>The long dashed loops are Earth’s field lines: they leave the planet in the southern hemisphere, arc out into space and dive back in up north. The highlighted one loops ${kmTxt(((st.L0 || 3)) * 6371)} above the equator; the dashes flow the way the field points. Only the parts above your horizon are drawn.</span></div>
       <div class="card-foot"><span>Sky Watch uses this to turn your phone’s magnetic heading into true north, so labels line up with the real sky.</span></div>`;
   }
   function homeCompact() { const f = fieldHere(); return `<button type="button" class="mini"><b>Compass ${Math.abs(f.decl).toFixed(1)}° ${f.decl < 0 ? 'W' : 'E'}</b><span class="mono">DIP ${Math.abs(f.incl).toFixed(0)}° · ${fmt(Math.round(f.F))} NT</span></button>`; }
