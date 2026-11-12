@@ -145,8 +145,17 @@
   const STARS = (window.SKY_STARS || []).map(s => ({ kind: 'star', name: s[0], raH: s[1], decD: s[2], mag: s[3], col: STAR_COL[s[4]] || '#ffffff', ly: s[5], v: null }));
   const STAR_BY = new Map(STARS.map(s => [s.name, s]));
   const CONST = (window.SKY_CONSTELLATIONS || []).map(c => ({ name: c[0], lines: c[1].map(p => [STAR_BY.get(p[0]), STAR_BY.get(p[1])]).filter(p => p[0] && p[1]) }));
-  for (const c of CONST) { const m = new Set(); c.lines.forEach(p => { m.add(p[0]); m.add(p[1]); }); c.members = [...m]; for (const s of m) s.con = s.con || c.name; }
+  for (const c of CONST) { c.kind = 'const'; const m = new Set(); c.lines.forEach(p => { m.add(p[0]); m.add(p[1]); }); c.members = [...m]; for (const s of m) s.con = s.con || c.name; }
   const SHOWERS = window.SKY_SHOWERS || [];
+  // What each figure is, and the month it is best placed in the evening sky (northern hemisphere).
+  const CONST_INFO = { 'Orion': ['The Hunter', 'January'], 'Ursa Major': ['The Great Bear, home of the Big Dipper', 'April'], 'Ursa Minor': ['The Little Bear, with Polaris the North Star at its tail', 'June'],
+    'Cassiopeia': ['The Queen, a W-shape opposite the Big Dipper', 'November'], 'Cygnus': ['The Swan, also called the Northern Cross', 'September'], 'Lyra': ['The Lyre, a small harp holding brilliant Vega', 'August'],
+    'Aquila': ['The Eagle', 'August'], 'Leo': ['The Lion', 'April'], 'Gemini': ['The Twins, Castor and Pollux', 'February'], 'Taurus': ['The Bull, with the Pleiades on its shoulder', 'December'],
+    'Auriga': ['The Charioteer', 'January'], 'Canis Major': ['The Great Dog, home of Sirius, the brightest star', 'February'], 'Scorpius': ['The Scorpion, with red Antares at its heart', 'July'],
+    'Crux': ['The Southern Cross', 'May'], 'Centaurus': ['The Centaur, home of our nearest star system', 'May'], 'Pegasus': ['The Winged Horse, marked by the Great Square', 'October'],
+    'Andromeda': ['The Chained Princess, with the Andromeda Galaxy', 'November'], 'Perseus': ['The Hero who rescued Andromeda', 'December'], 'Boötes': ['The Herdsman, led by orange Arcturus', 'June'],
+    'Virgo': ['The Maiden', 'May'], 'Corvus': ['The Crow', 'May'], 'Aries': ['The Ram', 'December'], 'Sagittarius': ['The Archer, whose stars form a teapot', 'August'],
+    'Libra': ['The Scales', 'June'], 'Cepheus': ['The King, husband of Cassiopeia', 'October'] };
   const PLANETS = [
     { name: 'Mercury', col: '#d8c8b0' }, { name: 'Venus', col: '#fff6dc' }, { name: 'Mars', col: '#ffb08a' },
     { name: 'Jupiter', col: '#ffe8c8' }, { name: 'Saturn', col: '#f1dca5' }, { name: 'Uranus', col: '#c8f0ff' }, { name: 'Neptune', col: '#a8c4ff' }
@@ -495,6 +504,7 @@
       S.precessedFor = now.getTime();
     }
     for (const s of STARS) s.v = refract(eqToEnu(s.ra, s.dec, lst, S.obs));
+    for (const c of CONST) { const v = [0, 0, 0]; for (const m of c.members) if (m.v) { v[0] += m.v[0]; v[1] += m.v[1]; v[2] += m.v[2]; } const n = Math.hypot(v[0], v[1], v[2]) || 1; c.v = v.map(x => x / n); }
     for (const d of DSOS) d.v = refract(eqToEnu(d.ra, d.dec, lst, S.obs));
     for (const pb of PROBES) pb.v = refract(eqToEnu(pb.raP, pb.decP, lst, S.obs));
     const su = sunEci(now);
@@ -714,8 +724,9 @@
     if (S.view === 'deep') drawDeep(placed, t);
 
     // constellation lines
-    if (S.f.layers.lines && S.f.layers.stars) {
-      g.lineWidth = 1; g.strokeStyle = C('#9db0ff', 0.38 * starDim);
+    const conMode = S.view === 'orbit' && S.preset === 'const';
+    if ((S.f.layers.lines && S.f.layers.stars) || conMode) {
+      g.lineWidth = conMode ? 1.6 : 1; g.strokeStyle = C('#9db0ff', (conMode ? 0.75 : 0.38) * starDim);
       g.beginPath();
       for (const c of CONST) for (const [a, b] of c.lines) {
         if (!a.v || !b.v) continue;
@@ -725,12 +736,16 @@
         g.moveTo(pa.x, pa.y); g.lineTo(pb.x, pb.y);
       }
       g.stroke();
-      g.font = '500 10.5px "Space Grotesk", Inter, sans-serif';
-      g.fillStyle = C('#afbef5', 0.75 * starDim);
+      g.font = conMode ? '600 12.5px "Space Grotesk", Inter, sans-serif' : '500 10.5px "Space Grotesk", Inter, sans-serif';
+      S.conCount = 0;
       for (const c of CONST) {
         let sx = 0, sy = 0, n = 0;
         for (const s of c.members) { if (!s.v) continue; const p = project(s.v); if (onScreen(p, 0) && altOf(s.v) > -1) { sx += p.x; sy += p.y; n++; } }
-        if (n >= 2 && sy / n + 18 > ZONE.top + 10 && sy / n + 18 < ZONE.bot) drawSpaced(c.name.toUpperCase(), sx / n, sy / n + 18, 3.5);
+        if (n >= 2 && sy / n + 18 > ZONE.top + 10 && sy / n + 18 < ZONE.bot) {
+          g.fillStyle = C(c === S.sel ? '#ffffff' : '#afbef5', (conMode ? 0.95 : 0.75) * starDim);
+          drawSpaced(c.name.toUpperCase(), sx / n, sy / n + 18, 3.5); S.conCount++;
+          hits.push({ x: sx / n, y: sy / n + 14, r: 40, o: c, pr: 0 });
+        }
       }
     }
     // stars
@@ -742,7 +757,7 @@
         if (s.mag < 1.5) { g.fillStyle = C(s.col, 0.16 * starDim); g.beginPath(); g.arc(p.x, p.y, r * 2.6, 0, 6.283); g.fill(); }
         g.fillStyle = C(s.col, starDim); g.beginPath(); g.arc(p.x, p.y, r, 0, 6.283); g.fill();
         hits.push({ x: p.x, y: p.y, r: 22, o: s, pr: 1 });
-        if (s.mag <= dens.star || s === S.sel) label(placed, p.x, p.y, r, s.name, s.ly ? fmt(s.ly) + ' LY' : '', C('#e8eeff', 0.9 * starDim), C('#93a3c9', 0.9 * starDim), 1);
+        if (s.mag <= (conMode ? 2.7 : dens.star) || s === S.sel || (S.sel && S.sel.kind === 'const' && S.sel.members.includes(s))) label(placed, p.x, p.y, r, s.name, s.ly ? fmt(s.ly) + ' LY' : '', C('#e8eeff', 0.9 * starDim), C('#93a3c9', 0.9 * starDim), 1);
       }
     }
     // planets, Moon, Sun
@@ -769,7 +784,12 @@
     }
     if (S.view === 'meteor') drawMeteorMode(now, placed, sunAlt);
     else if (S.f.layers.meteors && S.view === 'orbit') drawRadiants(now, placed, sunAlt);
-    if (S.view === 'orbit') drawSats(t, placed, dens, sunAlt);
+    if (S.view === 'orbit' && !conMode) drawSats(t, placed, dens, sunAlt);
+    if (S.sel && S.sel.kind === 'const') {
+      g.lineWidth = 2.4; g.strokeStyle = C('#ffffff', 0.85); g.beginPath();
+      for (const [a, b] of S.sel.lines) { if (!a.v || !b.v) continue; const pa = project(a.v), pb = project(b.v); if (pa.ok && pb.ok) { g.moveTo(pa.x, pa.y); g.lineTo(pb.x, pb.y); } }
+      g.stroke();
+    }
     drawArrows(t, placed);
     if (S.align) drawAlignTargets();
   }
@@ -1205,7 +1225,8 @@
     $('#roAlt').textContent = alt.toFixed(1) + '°';
     $('#roFov').textContent = Math.round(vfovDeg()) + '°';
     const rc = $('#roCount');
-    if (S.view === 'orbit') { if (!$('#roUp')) rc.innerHTML = '<b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW'; if (S.counts) { $('#roUp').textContent = fmt(S.counts.up); $('#roView').textContent = fmt(S.counts.inView); } }
+    if (S.view === 'orbit' && S.preset === 'const') rc.innerHTML = '<b>' + (S.conCount || 0) + '</b> CONSTELLATIONS IN VIEW';
+    else if (S.view === 'orbit') { if (!$('#roUp')) rc.innerHTML = '<b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW'; if (S.counts) { $('#roUp').textContent = fmt(S.counts.up); $('#roView').textContent = fmt(S.counts.inView); } }
     else if (S.view === 'deep') rc.innerHTML = '<b>' + (S.deepCount || 0) + '</b> DEEP-SKY IN VIEW';
     else rc.innerHTML = S.featObj ? 'RADIANT <b>' + Math.round(S.featObj.alt) + '°</b> UP' : '';
     drawTape(az);
@@ -1369,6 +1390,14 @@
       const rows = PROBES.map(p => { const a = p.v ? altOf(p.v) : -90; return `<button type="button" class="srch-row" data-probe="${esc(p.name)}"><span>${esc(p.name)}</span><span>${(au(p) * 0.1496).toFixed(1)}B KM · ${a > 0 ? cardinal(azOf(p.v)) + ' ' + Math.round(a) + '° UP' : 'BELOW HORIZON'}</span></button>`; }).join('');
       html = `<div class="card-head"><div style="flex:1"><div class="card-title">Deep space</div><div class="card-sub mono">SATELLITES HIDDEN · ${DSOS.length} SHOWPIECES · 4 SPACECRAFT</div></div></div>
         <div class="srch">${rows}<button type="button" class="srch-row" data-probe="JWST"><span>James Webb Space Telescope</span><span>1.5M KM · ${JWST.v && altOf(JWST.v) > 0 ? cardinal(azOf(JWST.v)) + ' ' + Math.round(altOf(JWST.v)) + '° UP' : 'BELOW HORIZON'}</span></button></div>`;
+    } else if (o.kind === 'const') {
+      const info = CONST_INFO[o.name] || ['', ''], alt = altOf(o.v), az = azOf(o.v);
+      const bright = o.members.slice().sort((a, b) => a.mag - b.mag)[0];
+      html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
+        <div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">CONSTELLATION · ${esc(info[0].split(',')[0].toUpperCase())}</div></div></div>
+        <div class="stats">${stat('BRIGHTEST', esc(bright.name))}${stat('STARS', o.members.length, 'drawn')}${stat('BEST', info[1].slice(0, 3).toUpperCase())}${stat('ALT', alt.toFixed(0), '°')}</div>
+        <div class="card-foot"><span>${esc(info[0])}. Best placed in the evening sky in ${esc(info[1])}.</span></div>
+        <div class="card-foot mono"><span>${alt > 0 ? cardinal(az) + ' ' + az.toFixed(0) + '° · ' + alt.toFixed(0) + '° UP' : 'BELOW YOUR HORIZON NOW'}</span></div>`;
     } else if (o.kind === 'dso') {
       const alt = altOf(o.v), az = azOf(o.v), yr = new Date().getFullYear();
       const left = o.ly >= 1e6 ? (o.ly / 1e6).toFixed(1) + ' million years ago' : o.ly > yr ? fmt(Math.round(o.ly - yr)) + ' BC' : 'in ' + (yr - Math.round(o.ly)) + ' AD';
@@ -1448,6 +1477,7 @@
       return line(f.name, (days > 0 ? 'PEAK IN ' + days + ' D' : 'PEAK NOW') + ' · BEST ' + tfmt(transit).replace(' ', '') + ' · RADIANT ' + Math.round(f.alt) + '°' + (S.autoCatch ? ' · CATCHING (' + S.caught + ')' : ''));
     }
     if (o.kind === 'sat') { const v = o.v ? satDir(o, now.getTime()) : null; return close + line(SPECIAL[o.id] || o.name, fmt(o.h) + ' KM · ' + (v && altOf(v) < 0 ? 'BELOW HORIZON' : o.lit ? 'MAG ' + o.mag.toFixed(1) + ' · ' + pos(v) : 'IN SHADOW · ' + pos(v))); }
+    if (o.kind === 'const') return close + line(o.name, esc(((CONST_INFO[o.name] || [''])[0].split(',')[0]).toUpperCase()) + ' · ' + pos(o.v));
     if (o.kind === 'star') return close + line(o.name, 'MAG ' + o.mag.toFixed(1) + (o.ly ? ' · ' + fmt(o.ly) + ' LY' : '') + ' · ' + pos(o.v));
     if (o.kind === 'dso') return close + line(dsoLabel(o), lyText(o.ly).toUpperCase() + ' · ' + seeWith(o) + ' · ' + pos(o.v));
     if (o.kind === 'probe') return close + line(o.short || o.name, (o.jwst ? '1.5M KM' : (probeAU(o, now) * 0.1496).toFixed(1) + 'B KM') + ' · ' + (o.v && altOf(o.v) > 0 ? pos(o.v) : 'BELOW HORIZON'));
@@ -1724,13 +1754,14 @@
     }
     const counts = { all: Sats.list.length, stations: 0, starlink: 0, new: 0 };
     for (const s of Sats.list) { if (s.groups.has('stations')) counts.stations++; if (s.groups.has('starlink')) counts.starlink++; if (s.groups.has('last-30-days')) counts.new++; }
-    const chips = [['all', 'Everything', counts.all], ['visible', 'Visible now'], ['stations', 'Stations', counts.stations], ['starlink', 'Starlink', counts.starlink], ['new', 'New launches', counts.new]];
+    const chips = [['all', 'Everything', counts.all], ['visible', 'Visible now'], ['const', 'Constellations'], ['stations', 'Stations', counts.stations], ['starlink', 'Starlink', counts.starlink], ['new', 'New launches', counts.new]];
     $('#chips').innerHTML = chips.map(([id, n, c]) => `<button type="button" class="chip glass" data-p="${id}" aria-pressed="${S.preset === id}">${n}${c ? ` <span class="n">${fmt(c)}</span>` : ''}</button>`).join('');
     $$('#chips .chip').forEach(b => b.onclick = () => {
       S.preset = b.dataset.p;
       if (S.preset === 'starlink' && !Sats.status.starlink) { S.f.groups.starlink = true; loadGroup('starlink'); }
       if (S.preset === 'new' && !Sats.status['last-30-days']) { S.f.groups['last-30-days'] = true; loadGroup('last-30-days'); }
       rebuildActive(); renderChips(); if (!S.sel) select(null);
+      if (S.preset === 'const') toast('Constellations: satellites hidden. Tap a constellation name to learn about it.');
       if (S.preset === 'visible') toast('Showing satellites bright enough to see by eye right now.');
     });
   }
@@ -1769,9 +1800,10 @@
     for (const s of Sats.list) { if (s.name.toLowerCase().includes(q) || String(s.id) === q || (SPECIAL[s.id] || '').toLowerCase().includes(q)) { res.push(s); if (res.length >= 8) break; } }
     for (const s of STARS) if (s.name.toLowerCase().includes(q) && res.length < 10) res.push(s);
     for (const p of PLANETS) if (p.name.toLowerCase().includes(q)) res.push(p);
+    for (const c of CONST) if (c.name.toLowerCase().includes(q)) res.push(c);
     for (const d of DSOS) if ((d.name + ' ' + d.id).toLowerCase().includes(q) && res.length < 14) res.push(d);
     for (const pb of PROBES.concat([JWST])) if ((pb.name + ' ' + (pb.short || '')).toLowerCase().includes(q)) res.push(pb);
-    out.innerHTML = res.length ? res.map((s, i) => `<button type="button" data-i="${i}"><span>${esc(s.kind === 'sat' ? s.name : s.name)}</span><span>${s.kind === 'sat' ? 'NORAD ' + s.id : s.kind === 'dso' ? DSO_TYPE[s.type].toUpperCase() : s.kind === 'probe' ? 'SPACECRAFT' : s.kind.toUpperCase()}</span></button>`).join('') : '<p class="muted">No match in the loaded data. Turn on more groups above.</p>';
+    out.innerHTML = res.length ? res.map((s, i) => `<button type="button" data-i="${i}"><span>${esc(s.kind === 'sat' ? s.name : s.name)}</span><span>${s.kind === 'sat' ? 'NORAD ' + s.id : s.kind === 'dso' ? DSO_TYPE[s.type].toUpperCase() : s.kind === 'probe' ? 'SPACECRAFT' : s.kind === 'const' ? 'CONSTELLATION' : s.kind.toUpperCase()}</span></button>`).join('') : '<p class="muted">No match in the loaded data. Turn on more groups above.</p>';
     $$('button', out).forEach(b => b.onclick = () => {
       const o = res[+b.dataset.i]; closeSheets();
       if ((o.kind === 'dso' || o.kind === 'probe') && S.view !== 'deep') setView('deep');
