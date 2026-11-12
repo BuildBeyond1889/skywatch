@@ -428,10 +428,20 @@ WORLDS.infra = (() => {
       done();
     });
     // FM, AM and TV transmitters out to ~100 miles
-    Promise.all([fcc(4, 160, 400), fcc(0, 160, 200), fcc(11, 160, 200)]).then(([fm, am, tv]) => {
+    // ArcGIS Online copies of the FCC FM and digital TV layers first (found through their public item records), NASA mirror as a fallback
+    const viaItem = async (item, layer, cnt) => {
+      try {
+        let base = ls.get('agolItem:' + item, '');
+        if (!base) { const r = await fetch('https://www.arcgis.com/sharing/rest/content/items/' + item + '?f=json'); const j = await r.json(); if (!j || !j.url) throw new Error('no url'); base = j.url.replace(/\/+$/, ''); if (/FeatureServer$|MapServer$/.test(base)) base += '/0'; base += '/'; ls.set('agolItem:' + item, base); }
+        const fs = await fcc(item.slice(0, 6), 160, cnt, base); if (fs) return fs;
+      } catch (e) { /* fall through */ }
+      return fcc(layer, 160, cnt);
+    };
+    Promise.all([viaItem('4cd9d7ee6cb347bcb4815c6f292a32b2', 4, 400), fcc(0, 160, 200), viaItem('2bfd434d9263401eadae464a9c26104f', 11, 200)]).then(([fm, am, tv]) => {
       st.status.fccBroadcast = fm || am || tv ? 'ok' : 'error';
       for (const [list, band] of [[fm, 'FM'], [am, 'AM'], [tv, 'TV']]) for (const f of list || []) {
-        const c = ll(f), p = f.properties || {}; if (!c) continue;
+        const c = ll(f), p0 = f.properties || {}, p = {}; if (!c) continue;
+        for (const k in p0) p[k.toLowerCase()] = typeof p0[k] === 'string' ? p0[k].trim() : p0[k];
         if (p.status && /^(CP|DEL|CAN)/i.test(p.status)) continue;
         const freq = band === 'FM' ? (p.frequency ? ' ' + parseFloat(p.frequency) : '') : band === 'AM' ? (p.frequency ? ' ' + parseFloat(p.frequency) + ' kHz' : '') : (p.channel ? ' ch ' + p.channel : '');
         addFcc(c[0], c[1], 'Broadcast tower', (p.callsign || band) + freq, titleCase(p.licensee || ''), +p.haat > 0 ? Math.min(+p.haat, 600) : 0, 'FCC');
