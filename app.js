@@ -211,6 +211,9 @@
   S.f.groups = Object.assign(Object.fromEntries(GROUPS.map(g => [g.id, g.on])), S.f.groups || {});
   S.f.layers = Object.assign({ stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true }, S.f.layers || {});
   if (S.f.autoStar == null) S.f.autoStar = true;
+  if (!S.f.haptics) S.f.haptics = 'visible';
+  if (!S.f.catchSens) S.f.catchSens = 'med';
+  if (S.f.showDetect == null) S.f.showDetect = false;
   const saveFilters = () => ls.set('filters', S.f);
   const simNow = () => new Date(Date.now() + S.offset);
 
@@ -792,6 +795,10 @@
     }
     drawArrows(t, placed);
     if (S.align) drawAlignTargets();
+    if (S.f.showDetect && ST.pts && performance.now() - ST.ptsAt < 1600 && S.mode === 'ar') {
+      g.strokeStyle = C('#7cf2b0', 0.9); g.lineWidth = 1;
+      for (const q of ST.pts) { g.beginPath(); g.arc(q.x, q.y, 7, 0, 6.283); g.stroke(); }
+    }
   }
   function drawSpaced(text, x, y, sp) {
     let w = 0; for (const ch of text) w += g.measureText(ch).width + sp;
@@ -917,7 +924,7 @@
   function drawSats(t, placed, dens, sunAlt) {
     if (!S.libs.sat) return;
     let up = 0, inView = 0;
-    const buckets = new Map(), cands = [];
+    const buckets = new Map(), cands = [], near = [];
     const visOnly = S.preset === 'visible';
     const A = Sats.active;
     for (let i = 0; i < A.length; i++) {
@@ -933,6 +940,7 @@
       const key = s.lit ? gcol : '#56607e';
       let b = buckets.get(key); if (!b) { b = []; buckets.set(key, b); } b.push(p.x, p.y, s.lit ? (s.mag < 3 ? 3.2 : 2.4) : 2);
       hits.push({ x: p.x, y: p.y, r: 20, o: s, pr: SPECIAL[s.id] ? 6 : 2 });
+      const dc = Math.hypot(p.x - W / 2, p.y - H / 2); if (dc < FOC * Math.tan(3 * D2R)) near.push({ s, d: dc });
       let score = 0;
       if (s === S.sel) score += 1e6;
       if (SPECIAL[s.id]) score += 1e4;
@@ -947,6 +955,7 @@
       for (let i = 0; i < arr.length; i += 3) { const z = arr[i + 2]; g.fillRect(arr[i] - z / 2, arr[i + 1] - z / 2, z, z); }
     }
     S.counts = { up, inView };
+    near.sort((a, b) => a.d - b.d); centerEvents(near, sunAlt);
     cands.sort((a, b) => b.score - a.score);
     // trails for the most interesting few
     const trailSats = cands.filter(c => SPECIAL[c.s.id] && c.s !== S.sel).slice(0, 3).map(c => c.s);
@@ -1235,7 +1244,7 @@
     if (S.mode !== 'ar') { txt.textContent = 'Sky view'; acc.textContent = ''; dot.classList.add('warn'); }
     else if (performance.now() - S.lastOrient > 1500) { txt.textContent = 'Sensors paused'; acc.textContent = ''; dot.classList.add('warn', 'pulse'); }
     else if (!S.absolute) { txt.textContent = 'No compass'; acc.textContent = 'ALIGN'; dot.classList.add('bad', 'pulse'); }
-    else if (ST.last && Date.now() - ST.last < 20000) { txt.textContent = 'Star lock'; acc.textContent = '±' + Math.max(0.1, ST.rms).toFixed(1) + '°'; dot.classList.add('pulse'); }
+    else if (ST.last && Date.now() - ST.last < 20000) { txt.textContent = (ST.src || 'Star') + ' lock'; acc.textContent = '±' + Math.max(0.1, ST.rms).toFixed(1) + '°'; dot.classList.add('pulse'); }
     else if (S.alignedAt && Date.now() - S.alignedAt < 6 * 3600e3) { txt.textContent = 'Aligned'; acc.textContent = '±0.5°'; dot.classList.add('pulse'); }
     else { txt.textContent = 'Compass'; acc.textContent = S.compassAcc != null ? '±' + Math.round(S.compassAcc) + '°' : '±10°'; dot.classList.add('warn'); }
     const nl = $('#notLive');
@@ -1345,7 +1354,8 @@
         <div class="stats">${stat('ALT', fmt(o.h), 'km')}${stat('VEL', o.spd.toFixed(2), 'km/s')}${stat('RANGE', fmt(o.range), 'km')}${stat('MAG', o.lit && alt > 0 ? o.mag.toFixed(1) : '—')}</div>
         <div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}° · ${alt.toFixed(1)}° UP</span><span>ORBIT ${fmt(o.perigee)}×${fmt(o.apogee)} KM · ${o.period.toFixed(0)} MIN</span><span>DATA ${ageD.toFixed(1)} D OLD</span></div>
         <div class="card-foot"><span>${next}</span></div>
-        <div class="card-actions">${o.next && o.next !== 'none' ? '<button type="button" class="btn small" id="calBtn">Add to calendar</button><button type="button" class="btn small" id="remindBtn">Remind me</button>' : ''}<button type="button" class="btn small" id="jumpBtn">${o.next && o.next !== 'none' ? 'Preview pass' : 'Centre it'}</button></div>`;
+        ${aboutHTML(o)}${o.id === 25544 || o.id === 48274 ? crewHTML(o.id) : ''}
+        <div class="card-actions">${o.next && o.next !== 'none' ? '<button type="button" class="btn small" id="calBtn">Add to calendar</button><button type="button" class="btn small" id="remindBtn">Remind me</button>' : ''}<button type="button" class="btn small" id="seenBtn">Seen it</button><button type="button" class="btn small" id="jumpBtn">${o.next && o.next !== 'none' ? 'Preview pass' : 'Centre it'}</button></div>`;
     } else if (o.kind === 'star') {
       const alt = altOf(o.v), az = azOf(o.v), yr = new Date().getFullYear();
       html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
@@ -1360,7 +1370,8 @@
       else st = stat('ALT', alt.toFixed(1), '°') + stat('AZ', az.toFixed(0), '°') + stat('LIGHT', '8.3', 'min') + stat('MAG', '−26.7');
       html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
         <div class="card-head"><div style="flex:1"><div class="card-title">${esc(o.kind === 'moon' ? moonPhaseName(o.phase) : o.name)}</div><div class="card-sub mono">${o.kind === 'planet' ? 'PLANET' : o.kind === 'moon' ? 'THE MOON' : 'THE SUN · NEVER LOOK AT IT DIRECTLY'}</div></div></div>
-        <div class="stats">${st}</div><div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}°</span></div>`;
+        <div class="stats">${st}</div><div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}°</span></div>
+        ${o.kind === 'planet' ? '<div class="card-actions"><button type="button" class="btn small" id="seenBtn">Seen it</button></div>' : ''}`;
     } else if (o.kind === 'shower') {
       html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
         <div class="card-head"><div style="flex:1"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">METEOR SHOWER · FROM ${esc(o.parent.toUpperCase())}</div></div></div>
@@ -1405,7 +1416,8 @@
         <div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(dsoLabel(o))}</div><div class="card-sub mono">${esc(DSO_TYPE[o.type].toUpperCase())} · ${esc(o.id)}</div></div><span class="tag" style="color:${DSO_COL[o.type]}">${seeWith(o)}</span></div>
         <div class="stats">${stat('DIST', o.ly >= 1e6 ? (o.ly / 1e6).toFixed(1) + 'M' : fmt(o.ly), 'ly')}${stat('MAG', o.mag > 50 ? '—' : o.mag.toFixed(1))}${stat('SIZE', o.size ? (o.size >= 60 ? (o.size / 60).toFixed(1) + '°' : o.size + "'") : '—')}${stat('ALT', alt.toFixed(1), '°')}</div>
         <div class="card-foot"><span>${esc(o.fact)}</span></div>
-        <div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}°</span><span>THE LIGHT YOU SEE LEFT ${esc(left.toUpperCase())}</span></div>`;
+        <div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}°</span><span>THE LIGHT YOU SEE LEFT ${esc(left.toUpperCase())}</span></div>
+        <div class="card-actions"><button type="button" class="btn small" id="seenBtn">Seen it</button></div>`;
     } else if (o.kind === 'probe') {
       const alt = o.v ? altOf(o.v) : 0, az = o.v ? azOf(o.v) : 0;
       const au = o.jwst ? 0.01 : probeAU(o, now), km = au * 1.496e8;
@@ -1430,6 +1442,7 @@
     $('#cardToggle', card).onclick = flip;
     const mini = $('.mini', card); if (mini) mini.onclick = flip;
     const cc = $('#cardClose', card); if (cc) cc.onclick = () => select(null);
+    const sb = $('#seenBtn', card); if (sb) sb.onclick = () => logSeen(o);
     const cb = $('#calBtn', card); if (cb) cb.onclick = () => passToCalendar(o, o.next);
     const sc = $('#showerCal', card); if (sc) sc.onclick = () => { const f = o.kind === 'meteorhome' ? S.featObj : o; showerToCalendar(f); };
     const tm = $('#toMeteor', card); if (tm) tm.onclick = () => { S.feat = o.name; setView('meteor'); };
@@ -1445,6 +1458,7 @@
 
   // Every object in the stations group: where it is now, or when it next rises above 10 degrees.
   function stationRows(now) {
+    if (!CREW) loadCrew();
     const list = Sats.list.filter(x => x.groups.has('stations')).sort((a, b) => (SPECIAL[b.id] ? 1 : 0) - (SPECIAL[a.id] ? 1 : 0) || a.name.localeCompare(b.name)).slice(0, 14);
     return list.map(st => {
       if (!st.v || st.jump !== S.jump) computeSat(st, epochCtx(now));
@@ -1454,7 +1468,8 @@
         findPasses(st, now, 24, { max: 1 }).then(r => { st.rise = r[0] ? r[0].start : 0; st.riseBusy = false; cardFor = null; });
       }
       const where = up ? cardinal(azOf(v)) + ' ' + Math.round(alt) + '° UP' + (st.lit ? '' : ' · SHADOW') : st.rise ? 'RISES ' + tfmt(new Date(st.rise)).replace(' ', '') : st.rise === 0 ? 'NO PASS IN 24 H' : 'BELOW HORIZON';
-      return { s: st, name: SPECIAL[st.id] || st.name, up, where };
+      const crewN = CREW && CREW[st.id] ? CREW[st.id].people.length : 0;
+      return { s: st, name: SPECIAL[st.id] || st.name, up, where: where + (crewN ? ' · ' + crewN + ' ABOARD' : '') };
     });
   }
   // Collapsed card: one line, or a sideways strip for the spacecraft list.
@@ -1483,6 +1498,192 @@
     if (o.kind === 'probe') return close + line(o.short || o.name, (o.jwst ? '1.5M KM' : (probeAU(o, now) * 0.1496).toFixed(1) + 'B KM') + ' · ' + (o.v && altOf(o.v) > 0 ? pos(o.v) : 'BELOW HORIZON'));
     if (o.kind === 'shower') return close + line(o.name, 'PEAK ' + o.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase() + ' · ~' + o.zhr + '/HR');
     return close + line(o.kind === 'moon' ? moonPhaseName(o.phase) : o.name, (o.mag != null && o.kind !== 'moon' ? 'MAG ' + o.mag.toFixed(1) + ' · ' : '') + pos(o.v));
+  }
+
+  // ---------- what is it: CelesTrak satellite catalog ----------
+  const OWNERS = { US: 'United States', PRC: 'China', CIS: 'Russia (former USSR)', ESA: 'European Space Agency', JPN: 'Japan', IND: 'India', FR: 'France', UK: 'United Kingdom', GER: 'Germany', IT: 'Italy', CA: 'Canada', SKOR: 'South Korea', ISRA: 'Israel', ISS: 'International (ISS partners)', EUME: 'EUMETSAT (Europe)', EUTE: 'Eutelsat', ITSO: 'Intelsat', SES: 'SES', GLOB: 'Globalstar', ORB: 'ORBCOMM', IRID: 'Iridium', O3B: 'O3b / SES', AB: 'Arab League (Arabsat)', BRAZ: 'Brazil', ARGN: 'Argentina', AUS: 'Australia', UAE: 'United Arab Emirates', TURK: 'Turkey', NZ: 'New Zealand', SAFR: 'South Africa', LUXE: 'Luxembourg', NOR: 'Norway', SPN: 'Spain', NETH: 'Netherlands', FIN: 'Finland', SWED: 'Sweden', SING: 'Singapore', TWN: 'Taiwan', INDO: 'Indonesia', MEX: 'Mexico', KAZ: 'Kazakhstan', UKR: 'Ukraine', IRAN: 'Iran', NKOR: 'North Korea', PAKI: 'Pakistan', ASRA: 'Austria', BEL: 'Belgium', DEN: 'Denmark', POL: 'Poland', CHLE: 'Chile', PER: 'Peru', THAI: 'Thailand', VTNM: 'Vietnam', SAUD: 'Saudi Arabia', QAT: 'Qatar', EGYP: 'Egypt', NIG: 'Nigeria', TBD: 'Unknown' };
+  const SITES = { AFETR: 'Cape Canaveral, Florida', AFWTR: 'Vandenberg, California', TYMSC: 'Baikonur, Kazakhstan', PLMSC: 'Plesetsk, Russia', VOSTO: 'Vostochny, Russia', KYMSC: 'Kapustin Yar, Russia', JSC: 'Jiuquan, China', XSC: 'Xichang, China', TSC: 'Taiyuan, China', WSC: 'Wenchang, China', YSLA: 'Yellow Sea (sea launch), China', FRGUI: 'Kourou, French Guiana', SRILR: 'Sriharikota, India', TNSTA: 'Tanegashima, Japan', KSCUT: 'Uchinoura, Japan', RLLB: 'Mahia, New Zealand', WRAS: 'Wallops, Virginia', ERAS: 'Air launch (east coast)', KODAK: 'Kodiak, Alaska', SEAL: 'Sea Launch platform', SNMLP: 'San Marco platform, Kenya', NSC: 'Naro, South Korea', SEMLS: 'Semnan, Iran', YAVNE: 'Palmachim, Israel', SADOL: 'Submarine launch, Barents Sea' };
+  const STATUS = { '+': 'Working', '-': 'Not working', P: 'Partly working', B: 'Backup', S: 'Spare', X: 'Extended mission', D: 'Decayed', '?': 'Unknown' };
+  function purposeOf(s, info) {
+    const n = s.name.toUpperCase(), t = info && info.OBJECT_TYPE;
+    if (t === 'R/B' || / R\/B/.test(n)) return 'Spent rocket stage left in orbit after a launch';
+    if (t === 'DEB' || / DEB/.test(n)) return 'Debris: a fragment from a breakup, collision or launch';
+    if (s.id === 25544) return 'International Space Station: crewed laboratory, continuously occupied since 2000';
+    if (s.id === 48274) return 'Tiangong, China’s crewed space station';
+    if (s.id === 20580) return 'Hubble Space Telescope';
+    if (/STARLINK/.test(n)) return 'Starlink internet satellite (SpaceX)';
+    if (/ONEWEB/.test(n)) return 'OneWeb internet satellite';
+    if (/KUIPER/.test(n)) return 'Amazon Kuiper internet satellite';
+    if (/SOYUZ|PROGRESS|DRAGON|CYGNUS|SHENZHOU|TIANZHOU|STARLINER|HTV/.test(n)) return 'Spacecraft visiting a space station';
+    if (/GPS|NAVSTAR|GALILEO|GSAT0|GLONASS|COSMOS 2[45]\d\d|BEIDOU|QZS|IRNSS|NAVIC/.test(n)) return 'Navigation satellite (GPS-type positioning)';
+    if (/GOES|NOAA|METEOSAT|METOP|HIMAWARI|FENGYUN|FY-|DMSP|SUOMI|JPSS|METEOR-M|ELEKTRO/.test(n)) return 'Weather satellite';
+    if (/IRIDIUM|GLOBALSTAR|ORBCOMM|INTELSAT|SES|EUTELSAT|ASTRA|INMARSAT|VIASAT|ECHOSTAR|DIRECTV|TELESAT|ARABSAT|TDRS/.test(n)) return 'Communications satellite';
+    if (/LANDSAT|SENTINEL|WORLDVIEW|PLANET|FLOCK|SKYSAT|SPOT|PLEIADES|TERRA|AQUA|AURA|ICESAT|GRACE|CRYOSAT|RESURS|GAOFEN|ZIYUAN|CARTOSAT|RADARSAT|TERRASAR|COSMO-SKYMED|ICEYE|CAPELLA|SWOT/.test(n)) return 'Earth-watching satellite (imaging or climate)';
+    if (/HST|CHANDRA|SWIFT|FERMI|NUSTAR|TESS|XMM|INTEGRAL|GAIA|NEOWISE|AGILE|ASTROSAT|HXMT|EINSTEIN/.test(n)) return 'Space telescope or science observatory';
+    if (/USA |NROL|LACROSSE|YAOGAN|KOSMOS|COSMOS/.test(n)) return 'Military or government satellite';
+    if (s.groups.has('science')) return 'Science satellite';
+    if (s.groups.has('weather')) return 'Weather satellite';
+    if (s.groups.has('gnss')) return 'Navigation satellite';
+    if (s.groups.has('stations')) return 'Spacecraft at a space station';
+    return t === 'PAY' ? 'Satellite (payload)' : 'Object in orbit';
+  }
+  function satInfo(s) {
+    if (s.info !== undefined) return s.info;
+    s.info = null;
+    (async () => {
+      const key = 'satcat:' + s.id, c = await idb.get(key);
+      if (c && Date.now() - c.t < 30 * 864e5) { s.info = c.d; cardFor = null; return; }
+      try {
+        const r = await fetch('https://celestrak.org/satcat/records.php?CATNR=' + s.id + '&FORMAT=JSON');
+        const j = await r.json(), d = Array.isArray(j) ? j[0] : j;
+        if (!d || !d.NORAD_CAT_ID) throw new Error('none');
+        s.info = d; idb.set(key, { t: Date.now(), d });
+      } catch (e) { s.info = c ? c.d : false; }
+      cardFor = null;
+    })();
+    return null;
+  }
+  function aboutHTML(s) {
+    const info = satInfo(s);
+    const purpose = purposeOf(s, info || null);
+    if (info === null) return `<div class="about"><b>${esc(purpose)}</b><span class="muted">Loading owner and launch details…</span></div>`;
+    if (!info) return `<div class="about"><b>${esc(purpose)}</b></div>`;
+    const yr = new Date().getFullYear(), ld = info.LAUNCH_DATE ? new Date(info.LAUNCH_DATE + 'T12:00:00Z') : null;
+    const age = ld ? yr - ld.getUTCFullYear() : null;
+    const rcs = parseFloat(info.RCS), size = isFinite(rcs) ? (rcs >= 1 ? 'Large' : rcs >= 0.1 ? 'Medium' : 'Small') + ' (radar size ' + (rcs >= 10 ? Math.round(rcs) : rcs.toFixed(2)) + ' m²)' : '';
+    const rows = [
+      ['Owner', OWNERS[info.OWNER] || info.OWNER || '—'],
+      ['Launched', ld ? ld.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) + (age ? ' · ' + age + ' yr ago' : '') : '—'],
+      ['From', SITES[info.LAUNCH_SITE] || info.LAUNCH_SITE || '—'],
+      ['Status', STATUS[info.OPS_STATUS_CODE] || (info.OBJECT_TYPE === 'PAY' ? 'Unknown' : 'Not a working satellite')]
+    ];
+    if (size) rows.push(['Size', size]);
+    return `<div class="about"><b>${esc(purpose)}</b>${rows.map(r => `<div class="kv"><span>${r[0]}</span><span>${esc(r[1])}</span></div>`).join('')}</div>`;
+  }
+
+  // ---------- who is aboard the stations ----------
+  let CREW = null, crewBusy = false;
+  function stationKey(name) { name = String(name || ''); return /international/i.test(name) ? 25544 : /tiangong|tianhe|china/i.test(name) ? 48274 : 0; }
+  function natOf(a) {
+    if (!a) return '';
+    if (Array.isArray(a.nationality)) return a.nationality.map(n => n.name || n.nationality_name || '').filter(Boolean).join(', ');
+    return a.nationality || '';
+  }
+  async function loadCrew() {
+    if (CREW || crewBusy) return; crewBusy = true;
+    const out = {};
+    const add = (id, p, exp) => { if (!id) return; (out[id] = out[id] || { exp, people: [] }).people.push(p); if (exp && !out[id].exp) out[id].exp = exp; };
+    const now = Date.now();
+    try {
+      let data = await cachedJSON('crew22', 'https://ll.thespacedevs.com/2.2.0/expedition/?is_active=true&mode=detailed&limit=10&ordering=-start', 6 * 3600e3);
+      if (!data || !data.results) data = await cachedJSON('crew23', 'https://ll.thespacedevs.com/2.3.0/expeditions/?is_active=true&mode=detailed&limit=10&ordering=-start', 6 * 3600e3);
+      for (const ex of (data && data.results) || []) {
+        const st = new Date(ex.start).getTime(), en = ex.end ? new Date(ex.end).getTime() : Infinity;
+        if (!(st <= now && en > now)) continue;
+        const sid = stationKey(ex.spacestation && ex.spacestation.name);
+        for (const c of ex.crew || []) {
+          const a = c.astronaut || {};
+          add(sid, { name: a.name, country: natOf(a), agency: (a.agency && (a.agency.abbrev || a.agency.name)) || '', role: (c.role && c.role.role) || '', launched: a.last_flight ? new Date(a.last_flight).getTime() : st }, ex.name);
+        }
+      }
+    } catch (e) { /* fall through */ }
+    if (!Object.keys(out).length) {
+      try {
+        const j = await cachedJSON('crewcq', 'https://corquaid.github.io/international-space-station-APIs/JSON/people-in-space.json', 6 * 3600e3);
+        for (const p of (j && j.people) || []) {
+          const sid = p.iss ? 25544 : /shenzhou|tiangong/i.test(p.spacecraft || '') ? 48274 : 0;
+          add(sid, { name: p.name, country: p.country || '', agency: p.agency || '', role: p.position || '', launched: p.launched ? p.launched * 1000 : 0 }, sid === 25544 ? (j.iss_expedition ? 'Expedition ' + j.iss_expedition : '') : '');
+        }
+      } catch (e) { /* none */ }
+    }
+    CREW = out; crewBusy = false; cardFor = null;
+  }
+  function crewHTML(id) {
+    if (!CREW) { loadCrew(); return '<div class="about"><span class="muted">Checking who is aboard…</span></div>'; }
+    const c = CREW[id];
+    if (!c || !c.people.length) return '<div class="about"><span class="muted">Crew list unavailable right now.</span></div>';
+    const now = Date.now();
+    return `<div class="about"><div class="sec-label" style="margin:0">${c.people.length} aboard now${c.exp ? ' · ' + esc(c.exp) : ''}</div>${c.people.map(p => {
+      const days = p.launched ? Math.max(0, Math.floor((now - p.launched) / 864e5)) : null;
+      return `<div class="crew"><div><b>${esc(p.name || 'Unknown')}</b><span>${esc([p.role, p.agency].filter(Boolean).join(' · '))}</span></div><div class="mono"><span>${esc(p.country || '')}</span><span>${days != null ? days + ' DAYS UP' : ''}</span></div></div>`;
+    }).join('')}</div>`;
+  }
+
+  // ---------- spotter log ----------
+  const LOG = { list: ls.get('log', []) };
+  const BADGES = [
+    ['first', 'First sighting', 'Log anything you have seen'], ['iss', 'Saw the ISS', ''], ['css', 'Saw Tiangong', ''], ['hst', 'Saw Hubble', ''],
+    ['train', 'Starlink train', 'Spot a fresh Starlink still climbing'], ['ten', '10 satellites', ''], ['fifty', '50 satellites', ''], ['hundred', '100 satellites', ''],
+    ['night3', '3 nights in a row', ''], ['deep', 'Deep-sky hunter', 'Log a galaxy, nebula or cluster'], ['planet', 'Planet spotter', 'Log a planet'], ['meteor', 'Meteor catcher', 'Auto-catch a meteor']
+  ];
+  const nightOf = t => { const d = new Date(t - 12 * 3600e3); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
+  function logStats() {
+    const L = LOG.list, sats = new Set(L.filter(e => e.k === 'sat').map(e => e.id));
+    const nights = [...new Set(L.map(e => nightOf(e.t)))].map(n => new Date(n + 'T12:00:00').getTime()).sort((a, b) => a - b);
+    let streak = nights.length ? 1 : 0, best = streak;
+    for (let i = 1; i < nights.length; i++) { streak = Math.round((nights[i] - nights[i - 1]) / 864e5) === 1 ? streak + 1 : 1; best = Math.max(best, streak); }
+    const has = id => L.some(e => e.k === 'sat' && e.id === id);
+    const earned = new Set();
+    if (L.length) earned.add('first');
+    if (has(25544)) earned.add('iss'); if (has(48274)) earned.add('css'); if (has(20580)) earned.add('hst');
+    if (L.some(e => e.train)) earned.add('train');
+    if (sats.size >= 10) earned.add('ten'); if (sats.size >= 50) earned.add('fifty'); if (sats.size >= 100) earned.add('hundred');
+    if (best >= 3) earned.add('night3');
+    if (L.some(e => e.k === 'dso')) earned.add('deep'); if (L.some(e => e.k === 'planet')) earned.add('planet'); if (L.some(e => e.k === 'meteor')) earned.add('meteor');
+    return { sats: sats.size, total: L.length, nights: nights.length, best, earned };
+  }
+  function logSeen(o, extra) {
+    if (o.kind === 'sat') {
+      const v = o.v && satDir(o, Date.now());
+      if (!v || altOf(v) < 0) { toast((SPECIAL[o.id] || o.name) + ' is below your horizon right now, so it can’t be seen. Log it during a pass.'); return; }
+      if (!o.lit) { toast((SPECIAL[o.id] || o.name) + ' is in Earth’s shadow right now, so it’s dark. Log it when it’s sunlit.'); return; }
+    } else if (o.v && altOf(o.v) < 0) { toast(o.name + ' is below your horizon right now.'); return; }
+    if (S.offset !== 0) { toast('Go back to LIVE time to log a sighting.'); return; }
+    const before = logStats().earned;
+    const e = Object.assign({ t: Date.now(), k: o.kind, id: o.kind === 'sat' ? o.id : o.name, name: o.kind === 'sat' ? (SPECIAL[o.id] || o.name) : (o.kind === 'dso' ? dsoLabel(o) : o.name) }, extra || {});
+    if (o.kind === 'sat') { e.mag = o.mag < 50 ? +o.mag.toFixed(1) : null; e.train = o.groups.has('starlink') && o.meanAlt < 430; const v = o.v && satDir(o, Date.now()); e.alt = v ? Math.round(altOf(v)) : null; }
+    const dup = LOG.list.find(x => x.k === e.k && x.id === e.id && Math.abs(x.t - e.t) < 20 * 60e3);
+    if (dup) { toast('Already logged ' + e.name + ' this pass.'); return; }
+    LOG.list.push(e); ls.set('log', LOG.list);
+    const after = logStats().earned, fresh = BADGES.filter(b => after.has(b[0]) && !before.has(b[0]));
+    try { navigator.vibrate && navigator.vibrate(fresh.length ? [40, 60, 40, 60, 120] : 40); } catch (er) { /* ignore */ }
+    toast(fresh.length ? 'Logged ' + e.name + '. New badge: ' + fresh.map(b => b[1]).join(', ') + '!' : 'Logged ' + e.name + '. ' + logStats().sats + ' different satellites seen so far.', 4000);
+    cardFor = null;
+  }
+  function buildLog() {
+    const st = logStats(), L = LOG.list.slice().sort((a, b) => b.t - a.t);
+    $('#logPane').innerHTML = `<div class="conds"><div><span>SATELLITES</span><span>${st.sats}</span></div><div><span>SIGHTINGS</span><span>${st.total}</span></div><div><span>NIGHTS</span><span>${st.nights}</span></div><div><span>BEST RUN</span><span>${st.best}</span></div></div>
+      <div class="sec-label">Badges · ${st.earned.size}/${BADGES.length}</div>
+      <div class="badges">${BADGES.map(b => `<div class="badge${st.earned.has(b[0]) ? ' on' : ''}"><b>${esc(b[1])}</b>${b[2] ? `<span>${esc(b[2])}</span>` : ''}</div>`).join('')}</div>
+      <div class="sec-label">Sightings</div>
+      ${L.length ? '<div class="list">' + L.slice(0, 80).map(e => `<div class="li"><div class="grow"><span class="t">${esc(e.name)}</span><span class="s mono">${esc(new Date(e.t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).toUpperCase())}${e.alt != null ? ' · ' + e.alt + '° UP' : ''}${e.mag != null ? ' · MAG ' + e.mag : ''}</span></div><span class="n">${esc((e.k === 'dso' ? 'DEEP SKY' : e.k).toUpperCase())}</span></div>`).join('') + '</div>'
+        : '<p class="muted">Nothing logged yet. In camera view, when a sunlit satellite crosses the middle of the screen, Sky Watch buzzes and asks "Seen it?". Tap to log it. You can also tap "Seen it" on any card.</p>'}`;
+  }
+
+  // ---------- haptic pings and "Seen it?" prompts ----------
+  const PING = { at: 0, last: new Map(), seenFor: null, seenAt: 0 };
+  function centerEvents(near, sunAlt) {
+    const now = performance.now();
+    // near: on-screen satellites close to the centre, nearest first
+    if (S.mode !== 'ar' || S.f.haptics === 'off' || S.dragging) return;
+    for (const c of near) {
+      const vis = c.s.lit && sunAlt < -4 && c.s.mag < 5.5;
+      if (S.f.haptics === 'visible' && !vis) continue;
+      if (c.d > FOC * Math.tan(2 * D2R)) continue;
+      const lt = PING.last.get(c.s.id) || 0;
+      if (now - lt < 15000 || now - PING.at < 400) continue;
+      PING.last.set(c.s.id, now); PING.at = now;
+      try { navigator.vibrate && navigator.vibrate(vis ? 18 : 8); } catch (e) { /* ignore */ }
+      if (vis && PING.seenFor !== c.s.id) showSeen(c.s);
+      break;
+    }
+  }
+  function showSeen(s) {
+    PING.seenFor = s.id; PING.seenAt = performance.now();
+    const b = $('#seenPill'); b.hidden = false;
+    $('#seenText').textContent = 'Seen ' + (SPECIAL[s.id] || prettyName(s.name)) + '? Tap to log';
+    b.onclick = () => { logSeen(s); b.hidden = true; };
+    clearTimeout(PING.hideT); PING.hideT = setTimeout(() => { b.hidden = true; PING.seenFor = null; }, 7000);
   }
 
   // ---------- calendar reminders (work even when the app is closed) ----------
@@ -1537,8 +1738,9 @@
     const { L, aw, ah } = fr; let sum = 0, sum2 = 0;
     for (let i = 0; i < L.length; i++) { sum += L[i]; sum2 += L[i] * L[i]; }
     const mean = sum / L.length, sd = Math.sqrt(Math.max(0, sum2 / L.length - mean * mean));
-    if (mean > 110) return; // too bright: daylight or lit scene
-    const thr = Math.max(mean + 5 * sd, mean + 40, 55), pts = [];
+    if (bodyLock(L, aw, ah, mean)) return;
+    if (mean > 110) return; // too bright for stars
+    const thr = Math.max(mean + 4 * sd, mean + 28, 45), pts = [];
     for (let y = 4; y < ah - 4; y++) for (let x = 4; x < aw - 4; x++) {
       const i = y * aw + x, l = L[i]; if (l < thr) continue;
       let peak = true;
@@ -1549,9 +1751,10 @@
       const sp = vidToScreen(x + 0.5, y + 0.5, aw); pts.push({ x: sp[0], y: sp[1], l });
     }
     pts.sort((a, b) => b.l - a.l); pts.length = Math.min(pts.length, 30);
+    ST.pts = pts; ST.ptsAt = performance.now(); ST.seen = pts.length;
     const preds = [];
     const addP = o => { if (!o.v || altOf(o.v) < 4) return; const p = project(o.v); if (onScreen(p, -12)) preds.push(p); };
-    STARS.forEach(s => { if (s.mag < 3) addP(s); }); PLANETS.forEach(p => { if (p.mag < 2) addP(p); }); addP(MOON);
+    STARS.forEach(s => { if (s.mag < 3.2) { const n0 = preds.length; addP(s); if (preds.length > n0) preds[preds.length - 1].mag = s.mag; } }); PLANETS.forEach(p => { if (p.mag < 2) addP(p); }); addP(MOON);
     if (preds.length < 3 || pts.length < 3) return;
     const R = FOC * Math.tan(8 * D2R), B = 7, bins = new Map();
     preds.forEach((p, pi) => pts.forEach(q => { const dx = q.x - p.x, dy = q.y - p.y; if (dx * dx + dy * dy > R * R) return; const k = Math.round(dx / B) + ',' + Math.round(dy / B); let b = bins.get(k); if (!b) bins.set(k, b = []); b.push({ pi, dx, dy }); }));
@@ -1562,13 +1765,42 @@
       const n = new Set(all.map(e => e.pi)).size;
       if (n > bestN) { bestN = n; best = all; }
     }
-    if (!best || bestN < 3) return;
+    if (!best || bestN < 2) return;
+    if (bestN === 2) { // two stars only: accept when both are bright and agree closely
+      const bright = new Set(best.map(e => e.pi)), ok2 = [...bright].every(pi => (preds[pi].mag || 0) < 1.6);
+      const sp = Math.max(...best.map(e => e.dx)) - Math.min(...best.map(e => e.dx)) + Math.max(...best.map(e => e.dy)) - Math.min(...best.map(e => e.dy));
+      if (!ok2 || sp / FOC * R2D > 0.6) return;
+    }
     const mx = best.reduce((a, e) => a + e.dx, 0) / best.length, my = best.reduce((a, e) => a + e.dy, 0) / best.length;
     const rms = Math.sqrt(best.reduce((a, e) => a + (e.dx - mx) ** 2 + (e.dy - my) ** 2, 0) / best.length) / FOC * R2D;
     const delta = wrap180(azOf(unproject(W / 2 - mx, H / 2 - my)) - azOf(fwd));
     if (Math.abs(delta) > 15) return;
     S.hcorr = wrap180(S.hcorr + delta * 0.6); ls.set('hcorr', S.hcorr);
-    ST.last = Date.now(); ST.n = bestN; ST.rms = rms;
+    ST.last = Date.now(); ST.n = bestN; ST.rms = rms; ST.src = 'Star';
+  }
+  // Daytime / Moon lock: find the Sun or Moon as a bright blob near where it should be.
+  function bodyLock(L, aw, ah, mean) {
+    let body = null;
+    if (SUN.v && altOf(SUN.v) > 3) { const p = project(SUN.v); if (onScreen(p, -20)) body = { o: SUN, p, thr: 248 }; }
+    if (!body && MOON.v && altOf(MOON.v) > 3) { const p = project(MOON.v); if (onScreen(p, -20)) body = { o: MOON, p, thr: Math.max(190, mean + 0.6 * (255 - mean)) }; }
+    if (!body) return false;
+    const vw = cam.videoWidth, vh = cam.videoHeight, sc = Math.max(W / vw, H / vh) * S.zoom, k = vw / aw;
+    const u0 = ((body.p.x - (W - vw * sc) / 2) / sc) / k, v0 = ((body.p.y - (H - vh * sc) / 2) / sc) / k;
+    const R = (FOC * Math.tan(12 * D2R)) / sc / k;
+    let n = 0, su = 0, sv = 0, minU = 1e9, maxU = -1, minV = 1e9, maxV = -1;
+    for (let v = Math.max(0, v0 - R | 0); v < Math.min(ah, v0 + R); v++) for (let u = Math.max(0, u0 - R | 0); u < Math.min(aw, u0 + R); u++) {
+      if (L[v * aw + u] < body.thr) continue;
+      n++; su += u; sv += v; if (u < minU) minU = u; if (u > maxU) maxU = u; if (v < minV) minV = v; if (v > maxV) maxV = v;
+    }
+    if (n < 3 || n > 2500) return false;
+    const span = Math.max(maxU - minU, maxV - minV);
+    if (span > 4 * Math.sqrt(n) + 6) return false; // scattered glare, not one disc
+    const sp = vidToScreen(su / n + 0.5, sv / n + 0.5, aw), dx = sp[0] - body.p.x, dy = sp[1] - body.p.y;
+    const fwd = unproject(W / 2, H / 2), delta = wrap180(azOf(unproject(W / 2 - dx, H / 2 - dy)) - azOf(fwd));
+    if (Math.abs(delta) > 15) return false;
+    S.hcorr = wrap180(S.hcorr + delta * 0.5); ls.set('hcorr', S.hcorr);
+    ST.last = Date.now(); ST.n = 1; ST.rms = Math.hypot(dx, dy) / FOC * R2D * 0.3; ST.src = body.o === SUN ? 'Sun' : 'Moon';
+    return true;
   }
 
   // ---------- meteor auto-catch: look for a fast streak between camera frames ----------
@@ -1581,13 +1813,15 @@
     const { L, aw } = fr, P = MC.prev; MC.prev = L;
     if (!P || P.length !== L.length || nowP < MC.cool) return;
     let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
-    for (let i = 0; i < L.length; i++) if (L[i] - P[i] > 38) { const x = i % aw, y = (i / aw) | 0; n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; if (n > 600) return; }
+    const SENS = { low: [50, 5, 16], med: [38, 4, 12], high: [28, 3.2, 9] }[S.f.catchSens] || [38, 4, 12];
+    for (let i = 0; i < L.length; i++) if (L[i] - P[i] > SENS[0]) { const x = i % aw, y = (i / aw) | 0; n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; if (n > 600) return; }
     if (n < 6) return;
     const mx = sx / n, my = sy / n, cxx = sxx / n - mx * mx, cyy = syy / n - my * my, cxy = sxy / n - mx * my;
     const tr = cxx + cyy, det = cxx * cyy - cxy * cxy, disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
     const l1 = tr / 2 + disc, l2 = Math.max(0.05, tr / 2 - disc);
-    if (Math.sqrt(l1 / l2) > 4 && 4 * Math.sqrt(l1) > 10) {
+    if (Math.sqrt(l1 / l2) > SENS[1] && 4 * Math.sqrt(l1) > SENS[2]) {
       MC.cool = nowP + 4000; S.caught++; cardFor = null;
+      LOG.list.push({ t: Date.now(), k: 'meteor', id: 'meteor-' + Date.now(), name: 'Possible meteor' + (S.featObj ? ' (' + S.featObj.name + ')' : '') }); ls.set('log', LOG.list);
       snapshot('POSSIBLE METEOR').then(() => toast('Caught a possible meteor. It is in your snapshots.'));
     }
   }
@@ -2025,6 +2259,13 @@
       <div class="li"><div class="grow"><span class="t">Automatic star lock</span><span class="s">When bright stars show in the camera, use them to correct the compass by itself</span></div><button type="button" class="switch" role="switch" id="autoStarSw" aria-checked="${!!S.f.autoStar}"><span></span></button></div>
       <div class="kv"><span>Current compass correction</span><span>${S.hcorr.toFixed(1)}°</span></div>
       <div class="inline"><button type="button" class="btn small" id="setAlign">Align now</button><button type="button" class="btn small" id="clrAlign">Clear correction</button></div>
+      <div class="li"><div class="grow"><span class="t">Show what the camera detects</span><span class="s">Green circles on the lights star lock can see, to check it is working</span></div><button type="button" class="switch" role="switch" id="detSw" aria-checked="${!!S.f.showDetect}"><span></span></button></div>
+      <div class="sec-label">Haptic pings</div>
+      <div class="seg" id="hapSeg"><button type="button" data-v="off">Off</button><button type="button" data-v="visible">Visible ones</button><button type="button" data-v="all">Everything</button></div>
+      <p class="muted" style="margin:0">Buzzes when a satellite crosses the middle of the screen in camera view. Android phones only; iPhones don’t let websites vibrate.</p>
+      <div class="sec-label">Meteor auto-catch sensitivity</div>
+      <div class="seg" id="sensSeg"><button type="button" data-v="low">Low</button><button type="button" data-v="med">Medium</button><button type="button" data-v="high">High</button></div>
+      <p class="muted" style="margin:0">Lower if it saves planes or flicker; higher if it misses faint meteors.</p>
       <div class="sec-label">Orbit data <button type="button" class="btn small" id="refresh">Refresh now</button></div>
       <div>${ages || '<p class="muted">Nothing loaded yet.</p>'}</div>
       <div class="sec-label">About</div>
@@ -2034,6 +2275,9 @@
     $('#fovIn').oninput = e => { S.fov = +e.target.value; ls.set('fov', S.fov); $('#fovLabel').textContent = S.fov + '°'; };
     $('#setAlign').onclick = () => { closeSheets(); setAlign(true); };
     $('#autoStarSw').onclick = () => { S.f.autoStar = !S.f.autoStar; saveFilters(); buildSettings(); };
+    $('#detSw').onclick = () => { S.f.showDetect = !S.f.showDetect; saveFilters(); buildSettings(); };
+    $$('#hapSeg button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.v === S.f.haptics); b.onclick = () => { S.f.haptics = b.dataset.v; saveFilters(); buildSettings(); try { navigator.vibrate && navigator.vibrate(20); } catch (e) { /* ignore */ } }; });
+    $$('#sensSeg button').forEach(b => { b.setAttribute('aria-pressed', b.dataset.v === S.f.catchSens); b.onclick = () => { S.f.catchSens = b.dataset.v; saveFilters(); buildSettings(); }; });
     $('#clrAlign').onclick = () => { S.hcorr = 0; ls.set('hcorr', 0); S.alignedAt = 0; ls.set('alignedAt', 0); toast('Compass correction cleared.'); buildSettings(); };
     $('#refresh').onclick = async () => { toast('Refreshing orbit data…'); await Promise.all(GROUPS.filter(gr => S.f.groups[gr.id] || Sats.status[gr.id]).map(gr => loadGroup(gr.id, true))); tonightDirty = true; toast('Orbit data refreshed.'); buildSettings(); };
   }
@@ -2071,7 +2315,15 @@
     if (!tag) toast('Snapshot saved. Tap the thumbnail to share it.');
   }
   function setGalleryThumb(src) { $('#galleryBtn').innerHTML = src ? `<img alt="" src="${src}">` : '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>'; }
+  let galTab = 'log';
+  function setGalTab(t) {
+    galTab = t; $$('#galTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === t));
+    $('#logPane').hidden = t !== 'log'; $('#shotPane').hidden = t !== 'shots'; $('#snapBtn').hidden = t !== 'shots';
+    if (t === 'log') buildLog();
+  }
+  $$('#galTabs button').forEach(b => b.onclick = () => setGalTab(b.dataset.v));
   async function buildGallery() {
+    setGalTab(galTab);
     const shots = (await idb.shots()).sort((a, b) => b.id - a.id);
     $('#shotEmpty').hidden = shots.length > 0;
     $('#shotGrid').innerHTML = shots.map(sh => `<button type="button" data-id="${sh.id}" aria-label="Snapshot from ${esc(new Date(sh.t).toLocaleString())}"><img alt="" src="${sh.thumb}"></button>`).join('');

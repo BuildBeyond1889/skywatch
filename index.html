@@ -133,7 +133,25 @@ body.red .tag.new { color: var(--warn); }
 .stats small { font-size: 9.5px; color: var(--dim); font-weight: 500; }
 .card-foot { font-size: 10px; color: var(--dim); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .card-foot b { color: var(--fg); font-weight: 500; }
-.card-actions { display: flex; gap: 8px; }
+.card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#card:not(.collapsed) { max-height: 58vh; overflow-y: auto; overscroll-behavior: contain; }
+.about { display: flex; flex-direction: column; gap: 2px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
+.about > b { font-size: 13px; margin-bottom: 4px; }
+.about .kv { padding: 4px 0; font-size: 12px; }
+.crew { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.crew:last-child { border-bottom: none; }
+.crew > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.crew > div:last-child { align-items: flex-end; text-align: right; flex: none; }
+.crew b { font-size: 13px; }
+.crew span { font-size: 11px; color: var(--dim); }
+.crew .mono span { font-family: var(--mono); font-size: 9.5px; }
+#seenPill { position: fixed; left: 50%; top: calc(50% + 44px); transform: translateX(-50%); color: var(--fg); border-color: color-mix(in srgb, var(--good) 60%, transparent); letter-spacing: 0.6px; }
+body.clear #seenPill { display: inline-flex; }
+.badges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.badge { padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line); opacity: 0.5; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.badge.on { opacity: 1; border-style: solid; border-color: color-mix(in srgb, var(--warn) 60%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.badge b { font-size: 13px; }
+.badge span { font-size: 11px; color: var(--dim); }
 #cardClose { position: absolute; right: 6px; top: 6px; width: 36px; height: 36px; border: none; background: none; color: var(--dim); font-size: 20px; line-height: 1; }
 
 #timebar { display: flex; flex-direction: column; gap: 4px; }
@@ -304,6 +322,7 @@ a { color: var(--accent); }
   </div>
 </div>
 
+<button type="button" id="seenPill" class="pill glass" hidden><span class="dot pulse"></span><span id="seenText">Seen it?</span></button>
 <div id="clearBar" class="glass" hidden><button type="button" id="feedBtn">Camera off</button><button type="button" id="unclearBtn">Show controls</button></div>
 <div id="flash"></div>
 <div id="toast" class="glass" role="status" aria-live="polite"></div>
@@ -336,8 +355,10 @@ a { color: var(--accent); }
 </section>
 
 <section class="sheet" id="sheetGallery" aria-label="Snapshots" aria-hidden="true">
-  <div class="sheet-head"><h2>Snapshots</h2><button type="button" class="btn small primary" id="snapBtn">Take snapshot</button><button type="button" class="btn small" data-close>Done</button></div>
-  <div class="sheet-body"><div class="shots" id="shotGrid"></div><p class="muted" id="shotEmpty">Snapshots you take are saved here, on this phone only.</p></div>
+  <div class="sheet-head"><h2>Your sky</h2><button type="button" class="btn small primary" id="snapBtn">Take snapshot</button><button type="button" class="btn small" data-close>Done</button></div>
+  <div class="sheet-body"><div class="seg" id="galTabs"><button type="button" data-v="log">Spotter log</button><button type="button" data-v="shots">Snapshots</button></div>
+  <div id="logPane"></div>
+  <div id="shotPane" hidden><div class="shots" id="shotGrid"></div><p class="muted" id="shotEmpty">Snapshots you take are saved here, on this phone only.</p></div></div>
 </section>
 
 <div id="viewer" hidden><img id="viewerImg" alt="Labeled sky snapshot"><div class="row"><button type="button" class="btn primary" id="vShare">Save or share</button><button type="button" class="btn" id="vDelete">Delete</button><button type="button" class="btn" id="vClose">Close</button></div></div>
@@ -354,8 +375,8 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=6"></script>
-<script src="deep.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="stars.js?v=7"></script>
+<script src="deep.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
