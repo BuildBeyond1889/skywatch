@@ -380,11 +380,12 @@ WORLDS.infra = (() => {
     st.towers.push({ world: 'infra', kind: 'tower', name: t.name || t['name:en'] || kind, type: kind, op: t.operator || '', h, lat: c[0], lon: c[1], tags: t, dist: gcKm(S.obs.lat, S.obs.lon, c[0], c[1]) });
   }
   const FCC = 'https://maps.nccs.nasa.gov/mapping/rest/services/hifld_open/communications/FeatureServer/';
-  async function fcc(layer, km, cnt) {
+  const AGOL_CELL = 'https://services.arcgis.com/0ZRg6WRC7mxSLyKX/ArcGIS/rest/services/Cellular_Towers/FeatureServer/0/';
+  async function fcc(layer, km, cnt, base) {
     const L = S.obs.lat, N = S.obs.lon, dl = km / 111, dn = km / (111 * Math.max(Math.cos(L * D2R), 0.2));
-    const key = 'fcc' + layer + ':' + L.toFixed(2) + ',' + N.toFixed(2) + ':' + km;
+    const key = 'fcc' + (base ? 'A' : '') + layer + ':' + L.toFixed(2) + ',' + N.toFixed(2) + ':' + km;
     const c = await idb.get(key); if (c && c.data && Date.now() - c.t < 14 * 864e5) return c.data;
-    const url = FCC + layer + '/query?where=1%3D1&geometry=' + [N - dn, L - dl, N + dn, L + dl].map(v => v.toFixed(4)).join(',') + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=true&outSR=4326&resultRecordCount=' + cnt + '&f=geojson';
+    const url = (base || FCC + layer + '/') + 'query?where=1%3D1&geometry=' + [N - dn, L - dl, N + dn, L + dl].map(v => v.toFixed(4)).join(',') + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=true&outSR=4326&resultRecordCount=' + cnt + '&f=geojson';
     try {
       const ac = new AbortController(), to = setTimeout(() => ac.abort(), 30000);
       const r = await fetch(url, { signal: ac.signal }).finally(() => clearTimeout(to)); if (!r.ok) throw new Error(r.status);
@@ -411,9 +412,15 @@ WORLDS.infra = (() => {
     const done = () => { st.towers.sort((a, b) => a.dist - b.dist); cardFor = null; };
     st.status.fccCell = 'loading'; st.status.fccBroadcast = 'loading';
     // cell sites (FCC licence locations) within ~5 miles
-    fcc(3, 8, 600).then(fs => {
+    // ArcGIS Online copy first (it allows requests from any website), the NASA mirror as a fallback
+    fcc(0, 8, 1500, AGOL_CELL).then(fs => fs || fcc(3, 8, 600)).then(fs => {
       st.status.fccCell = fs ? 'ok' : 'error';
-      for (const f of fs || []) { const c = ll(f), p = f.properties || {}; if (!c) continue; addFcc(c[0], c[1], 'Cell / radio mast', '', carrier(p.licensee || ''), +p.allstruc || +p.supstruc || 0, 'FCC'); }
+      for (const f of fs || []) {
+        const c = ll(f), p0 = f.properties || {}, p = {}; if (!c) continue;
+        for (const k in p0) p[k.toLowerCase()] = p0[k];
+        if (p.licstatus && !/^a/i.test(p.licstatus)) continue;
+        addFcc(c[0], c[1], 'Cell / radio mast', '', carrier(p.licensee || ''), +p.allstruc || +p.supstruc || 0, 'FCC');
+      }
       done();
     });
     // FM, AM and TV transmitters out to ~100 miles
@@ -439,17 +446,15 @@ WORLDS.infra = (() => {
     const L = S.obs.lat, N = S.obs.lon, tag = '["man_made"~"^(mast|tower|communications_tower)$"]';
     const bb = km => { const dl = km / 111, dn = km / (111 * Math.max(Math.cos(L * D2R), 0.2)); return [(L - dl).toFixed(3), (N - dn).toFixed(3), (L + dl).toFixed(3), (N + dn).toFixed(3)].join(','); };
     const towersDone = (j, near, which) => { st.status[which] = j ? 'ok' : 'error'; for (const e of (j && j.elements) || []) { const t = e.tags || {}; if (/data_center|exchange/.test(t.telecom || '')) { const c = centerOf(e); if (c) st.dcs.push({ world: 'infra', kind: 'dc', name: t.name || (t.telecom === 'exchange' ? 'Telephone exchange' : 'Data centre'), op: t.operator || '', lat: c[0], lon: c[1] }); } else addTower(e, near); } st.towers.sort((a, b) => a.dist - b.dist); cardFor = null; };
-    // 1. TV, radio and other big towers out to about 100 miles (a bounding box is much faster for the map server than a radius)
-    st.status.far = 'loading'; cardFor = null;
-    overpass('infraFar2:' + key, `[out:json][timeout:30][bbox:${bb(160)}];(nwr["man_made"~"^(mast|tower)$"]["tower:type"~"broadcast|radio|television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:radio"];nwr["man_made"="communications_tower"];nwr["man_made"="mast"]["height"~"^([1-9][0-9][0-9]|[6-9][0-9])"];);out center tags 600;`, 14 * 864e5)
-      .then(j => towersDone(j, false, 'far'));
+    let chain = Promise.resolve();
+    const queue = fn => (chain = chain.then(fn, fn));
     // 2. every mapped mast and communication tower within about 15 miles, plus data centres
     st.status.near = 'loading';
-    overpass('infraNear2:' + key, `[out:json][timeout:25][bbox:${bb(25)}];(nwr["man_made"="mast"];nwr["man_made"="tower"]["tower:type"~"communication|broadcast"];nwr["man_made"="communications_tower"];nwr["telecom"~"data_center|exchange"];);out center tags 500;`, 7 * 864e5)
-      .then(j => towersDone(j, true, 'near'));
+    queue(() => overpass('infraNear2:' + key, `[out:json][timeout:25][bbox:${bb(25)}];(nwr["man_made"="mast"];nwr["man_made"="tower"]["tower:type"~"communication|broadcast"];nwr["man_made"="communications_tower"];nwr["telecom"~"data_center|exchange"];);out center tags 500;`, 7 * 864e5)
+      .then(j => towersDone(j, true, 'near')));
     // 3. the power grid: transmission lines and substations
     st.status.power = 'loading';
-    overpass('infraPower2:' + key, `[out:json][timeout:30][bbox:${bb(25)}];(way["power"="line"];way["power"="substation"];node["power"="substation"];way["power"="plant"]["plant:output:electricity"];);out geom 900;`, 14 * 864e5)
+    queue(() => overpass('infraPower2:' + key, `[out:json][timeout:30][bbox:${bb(25)}];(way["power"="line"];way["power"="substation"];node["power"="substation"];way["power"="plant"]["plant:output:electricity"];);out geom 900;`, 14 * 864e5)
       .then(j => {
         st.status.power = j ? 'ok' : 'error';
         for (const e of (j && j.elements) || []) {
@@ -459,7 +464,11 @@ WORLDS.infra = (() => {
           else if (e.geometry && e.geometry.length > 1) { const gm = e.geometry, step = Math.max(1, Math.floor(gm.length / 40)); st.power.push({ world: 'infra', kind: 'power', name: t.name || (t.power === 'line' ? 'High-voltage line' : 'Power line'), volt: t.voltage || '', op: t.operator || '', geom: gm.filter((n, i) => i % step === 0 || i === gm.length - 1), h: t.power === 'line' ? 0.03 : 0.012 }); }
         }
         cardFor = null;
-      });
+      }));
+    // 1. TV, radio and other big towers out to about 100 miles (a bounding box is much faster for the map server than a radius)
+    st.status.far = 'loading'; cardFor = null;
+    queue(() => overpass('infraFar2:' + key, `[out:json][timeout:30][bbox:${bb(160)}];(nwr["man_made"~"^(mast|tower)$"]["tower:type"~"broadcast|radio|television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:radio"];nwr["man_made"="communications_tower"];nwr["man_made"="mast"]["height"~"^([1-9][0-9][0-9]|[6-9][0-9])"];);out center tags 600;`, 14 * 864e5)
+      .then(j => towersDone(j, false, 'far')));
   }
   // geostationary and navigation satellites (computed here every second)
   function satsOf(gid) { return Sats.list.filter(s => s.groups.has(gid)); }
