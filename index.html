@@ -96,6 +96,12 @@ body.ar .chip[aria-pressed="true"] { background: var(--chip); }
 #famPill .dot { background: #ffd37a; }
 body.red #famPill { color: var(--fg); border-color: var(--line); background: var(--panel-ar); }
 .hero .row { flex-wrap: wrap; }
+#tips { position: fixed; left: 0; right: 0; bottom: calc(var(--sb) + 150px); display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+.tip-card { pointer-events: auto; max-width: 400px; width: 100%; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 18px 40px rgba(0,0,0,0.5); }
+.tip-card b { font: 700 18px var(--display); }
+.tip-card p { margin: 0 0 6px; color: color-mix(in srgb, var(--fg) 85%, transparent); font-size: 13.5px; }
+.tip-step { font-size: 10px; letter-spacing: 1.4px; color: var(--accent); }
+#ctBox .seg button { font-size: 11.5px; }
 .cbars { display: flex; align-items: flex-end; gap: 2px; height: 70px; padding-bottom: 14px; }
 .cb { flex: 1; height: 100%; position: relative; display: flex; align-items: flex-end; border-radius: 3px; }
 .cb.night { background: rgba(140,170,255,0.09); }
@@ -337,6 +343,7 @@ a { color: var(--accent); }
 
 <button type="button" id="seenPill" class="pill glass" hidden><span class="dot pulse"></span><span id="seenText">Seen it?</span></button>
 <div id="clearBar" class="glass" hidden><button type="button" id="feedBtn">Camera off</button><button type="button" id="unclearBtn">Show controls</button></div>
+<div id="tips" hidden></div>
 <div id="flash"></div>
 <div id="toast" class="glass" role="status" aria-live="polite"></div>
 <div id="scrim"></div>
@@ -348,6 +355,8 @@ a { color: var(--accent); }
     <div class="srch" id="searchResults"></div>
     <div class="sec-label">Satellite groups</div>
     <div class="list" id="groupList"></div>
+    <div class="sec-label">Country and type</div>
+    <div id="ctBox" style="display:flex;flex-direction:column;gap:8px"></div>
     <div class="sec-label">Height above Earth <span class="mono" id="hLabel"></span></div>
     <div class="grid2"><input type="range" id="hMin" min="0" max="13" step="1" aria-label="Minimum height"><input type="range" id="hMax" min="1" max="14" step="1" aria-label="Maximum height"></div>
     <div class="sec-label">Labels</div>
@@ -393,8 +402,15 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=9"></script>
-<script src="deep.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="stars.js?v=10"></script>
+<script src="deep.js?v=10"></script>
+<script src="js/core.js?v=10"></script>
+<script src="js/data.js?v=10"></script>
+<script src="js/view.js?v=10"></script>
+<script src="js/render.js?v=10"></script>
+<script src="js/cards.js?v=10"></script>
+<script src="js/sensing.js?v=10"></script>
+<script src="js/ui.js?v=10"></script>
+<script src="js/main.js?v=10"></script>
 </body>
 </html>

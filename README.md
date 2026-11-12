@@ -24,3 +24,8 @@ The camera and motion sensors only work over https, so the app needs a real web 
 - **Add to calendar** on any pass or meteor peak sets a phone reminder that works with the app closed.
 
 Data: CelesTrak (orbits), The Space Devs (launches), NOAA SWPC (aurora). Orbit data is cached on the phone for offline use.
+
+## Code layout
+All files load in order from index.html and share one global scope:
+`stars.js`, `deep.js` (catalog data), then `js/core.js` → `data.js` → `view.js` → `render.js` → `cards.js` → `sensing.js` → `ui.js` → `main.js`.
+When releasing, bump the cache name in `sw.js` and the `?v=N` on the script tags.
