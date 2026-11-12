@@ -2098,6 +2098,30 @@
     planet: '<circle cx="12" cy="12" r="5"/><path d="M3 15c4 2 14-2 18-6"/>',
     moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
   };
+  function evGo(go, ...a) { return evRow(...a).replace('<div class="event">', `<div class="event go" role="button" tabindex="0" data-go="${esc(go)}" aria-label="Show in the sky">`); }
+  // Tapping a Tonight item: close the panel, show live time, select the object and swing to it (or to its next pass).
+  function goTo(go) {
+    closeSheets();
+    const k = go.split(':')[0], v = go.slice(go.indexOf(':') + 1);
+    if (k === 'shower') { S.feat = v; setView('meteor'); return; }
+    let o = null;
+    if (k === 'sat' || k === 'new') o = Sats.byId.get(+v);
+    else if (k === 'planet') o = PLANETS.find(p => p.name === v);
+    else if (k === 'moon') o = MOON;
+    if (!o) { toast('That object is not loaded right now.'); return; }
+    if (S.offset !== 0) setOffset(0);
+    if (S.view !== 'orbit') setView('orbit');
+    if (S.preset === 'const') S.preset = 'all';
+    if (k === 'new') S.preset = 'new';
+    if (o.kind === 'sat') { S.pinned.add(o.id); rebuildActive(); computeSat(o, epochCtx(simNow())); }
+    renderChips(); select(o);
+    const dir = o.kind === 'sat' ? (o.v ? satDir(o, simNow().getTime()) : null) : o.v;
+    const nm = o.kind === 'sat' ? (SPECIAL[o.id] || o.name) : o.name;
+    if (dir && altOf(dir) > 0) {
+      if (S.mode === 'sky') { S.viewAz = azOf(dir); S.viewAlt = clamp(altOf(dir), 5, 85); }
+      toast(S.mode === 'ar' ? nm + ' is up now. Follow the arrow at the edge of the screen.' : 'Showing ' + nm + ' live.');
+    } else toast(nm + ' is below your horizon right now.' + (o.kind === 'sat' ? ' Its next visible pass is drawn in the sky.' : ''), 4000);
+  }
   function evRow(icon, color, title, when, desc, meta) {
     return `<div class="event"><div class="ico" style="color:${color};background:color-mix(in srgb, ${color} 14%, transparent)"><svg viewBox="0 0 24 24">${ICON[icon]}</svg></div><div class="grow"><div class="h"><b>${title}</b><span style="color:${color}">${when}</span></div>${desc ? `<div class="d">${desc}</div>` : ''}${meta ? `<div class="m">${meta}</div>` : ''}</div></div>`;
   }
@@ -2143,10 +2167,10 @@
       const mins = Math.round((bp.vStart - Date.now()) / 60000);
       parts.push(`<div class="sec-label">Best pass</div><div class="hero"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><div class="mono" style="font-size:9.5px;letter-spacing:1.4px;color:var(--accent)">${esc(nm.toUpperCase())} FLYOVER</div><div style="font:700 20px var(--display)">${dfmt(new Date(bp.vStart))}</div></div><div style="text-align:right"><div class="mono" style="font-size:20px;font-weight:600">${tfmt(new Date(bp.vStart))}</div><div class="mono" style="font-size:9.5px;color:var(--dim)">${mins > 0 ? 'IN ' + (mins >= 60 ? Math.floor(mins / 60) + 'H ' : '') + (mins % 60) + 'M' : 'NOW'}</div></div></div>
         <div class="mono" style="font-size:10.5px;color:var(--dim);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>RISES ${cardinal(bp.vStartAz)}</span><span>MAX ${Math.round(bp.maxEl)}°</span><span>SETS ${cardinal(bp.vEndAz)}</span><span>MAG ${bp.mag.toFixed(1)}</span><span>${Math.max(1, Math.round((bp.vEnd - bp.vStart) / 60000))} MIN</span></div>
-        <div class="row"><button type="button" class="btn primary small" data-remind="${best.s.id}:${bp.vStart}:${Math.round(bp.vStartAz)}">Remind me</button><button type="button" class="btn small" data-cal="${best.s.id}">Add to calendar</button><button type="button" class="btn small" data-preview="${bp.maxT}" data-sel="${best.s.id}">Preview</button></div></div>`);
+        <div class="row"><button type="button" class="btn primary small" data-remind="${best.s.id}:${bp.vStart}:${Math.round(bp.vStartAz)}">Remind me</button><button type="button" class="btn small" data-go="sat:${best.s.id}">Show me</button><button type="button" class="btn small" data-cal="${best.s.id}">Add to calendar</button><button type="button" class="btn small" data-preview="${bp.maxT}" data-sel="${best.s.id}">Preview</button></div></div>`);
       evCount++;
       const rest = passes.filter(x => x !== best).slice(0, 5);
-      if (rest.length) parts.push('<div class="list">' + rest.map(x => evRow('pass', '#5ad1ff', esc(SPECIAL[x.s.id]) + ' pass', tfmt(new Date(x.p.vStart)), '', `${dfmt(new Date(x.p.vStart)).toUpperCase()} · ${cardinal(x.p.vStartAz)}→${cardinal(x.p.vEndAz)} · MAX ${Math.round(x.p.maxEl)}° · MAG ${x.p.mag.toFixed(1)}`)).join('') + '</div>');
+      if (rest.length) parts.push('<div class="list">' + rest.map(x => evGo('sat:' + x.s.id, 'pass', '#5ad1ff', esc(SPECIAL[x.s.id]) + ' pass', tfmt(new Date(x.p.vStart)), '', `${dfmt(new Date(x.p.vStart)).toUpperCase()} · ${cardinal(x.p.vStartAz)}→${cardinal(x.p.vEndAz)} · MAX ${Math.round(x.p.maxEl)}° · MAG ${x.p.mag.toFixed(1)}`)).join('') + '</div>');
     } else parts.push('<div class="sec-label">Station passes</div><p class="muted">No visible ISS, Tiangong or Hubble passes in the next 24 hours from here. They are only visible near dawn and dusk, when you are in darkness but they are still in sunlight.</p>');
 
     // orbit events
@@ -2159,27 +2183,27 @@
       const lead = tr.a[tr.a.length >> 1];
       const ps = await findPasses(lead, now, 48, { visibleOnly: true, max: 1 });
       const p = ps[0];
-      ev.push(evRow('train', '#8fb8ff', 'Starlink train · launch ' + esc('20' + tr.k.slice(0, 2) + '-' + tr.k.slice(2)), p ? tfmt(new Date(p.vStart)) : 'NOT VISIBLE SOON',
+      ev.push(evGo('sat:' + lead.id, 'train', '#8fb8ff', 'Starlink train · launch ' + esc('20' + tr.k.slice(0, 2) + '-' + tr.k.slice(2)), p ? tfmt(new Date(p.vStart)) : 'NOT VISIBLE SOON',
         `${tr.a.length} satellites still climbing to their final orbit, so they fly in a line. Fresh trains are the brightest.`,
         `AVG HEIGHT ${fmt(tr.med)} KM${p ? ' · ' + dfmt(new Date(p.vStart)).toUpperCase() + ' · ' + cardinal(p.vStartAz) + '→' + cardinal(p.vEndAz) + ' · MAX ' + Math.round(p.maxEl) + '°' : ''}`));
       evCount++;
     }
     // maneuvers
     for (const m of S.events.filter(e => e.type === 'maneuver')) {
-      ev.push(evRow('boost', '#7cf2b0', esc(m.name) + (m.delta > 0 ? ' raised its orbit' : ' lowered its orbit'), 'DETECTED', `Its average height changed by ${Math.abs(m.delta).toFixed(1)} km since the last data update. That means an engine burn.`, ''));
+      ev.push(evGo('sat:' + m.id, 'boost', '#7cf2b0', esc(m.name) + (m.delta > 0 ? ' raised its orbit' : ' lowered its orbit'), 'DETECTED', `Its average height changed by ${Math.abs(m.delta).toFixed(1)} km since the last data update. That means an engine burn.`, ''));
       evCount++;
     }
     // reentry watch
     const decaying = Sats.list.filter(s => s.perigee < 220 && s.perigee > 80 && !SPECIAL[s.id]).sort((a, b) => a.perigee - b.perigee).slice(0, 4);
     for (const s of decaying) {
-      ev.push(evRow('reentry', '#ff8a7a', 'Reentry watch: ' + esc(prettyName(s.name)), s.perigee < 180 ? 'DAYS' : 'WEEKS', s.perigee < 180 ? 'Low enough that air drag will bring it down within days.' : 'Dropping toward reentry in the coming weeks.', `LOWEST POINT ${fmt(s.perigee)} KM · NORAD ${s.id}`));
+      ev.push(evGo('sat:' + s.id, 'reentry', '#ff8a7a', 'Reentry watch: ' + esc(prettyName(s.name)), s.perigee < 180 ? 'DAYS' : 'WEEKS', s.perigee < 180 ? 'Low enough that air drag will bring it down within days.' : 'Dropping toward reentry in the coming weeks.', `LOWEST POINT ${fmt(s.perigee)} KM · NORAD ${s.id}`));
       evCount++;
     }
     // new launches in orbit
     const recent = new Map();
     for (const s of Sats.list) if (s.groups.has('last-30-days')) { if (!recent.has(s.launch)) recent.set(s.launch, []); recent.get(s.launch).push(s); }
     const recentL = [...recent.values()].sort((a, b) => b[0].launch.localeCompare(a[0].launch)).slice(0, 3);
-    for (const a of recentL) ev.push(evRow('launch', '#ff9ad0', 'New in orbit: ' + esc(prettyName(a[0].name.replace(/-\d+$/, ''))), a.length + ' OBJECT' + (a.length > 1 ? 'S' : ''), '', `LAUNCH ${esc(a[0].intl.slice(0, 5))} · ${fmt(a[0].meanAlt)} KM · TAP "NEW LAUNCHES" TO SEE THEM`));
+    for (const a of recentL) ev.push(evGo('new:' + a[0].id, 'launch', '#ff9ad0', 'New in orbit: ' + esc(prettyName(a[0].name.replace(/-\d+$/, ''))), a.length + ' OBJECT' + (a.length > 1 ? 'S' : ''), '', `LAUNCH ${esc(a[0].intl.slice(0, 5))} · ${fmt(a[0].meanAlt)} KM · TAP "NEW LAUNCHES" TO SEE THEM`));
     // upcoming launches (The Space Devs)
     const ll = await cachedJSON('ll2', 'https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=6&mode=list', 3600e3);
     if (ll && ll.results) {
@@ -2201,10 +2225,10 @@
           const up = p.v && altOf(p.v) > 0;
           let when = up ? 'UP NOW' : '';
           if (!up) { const r = A.SearchRiseSet(p.name, ob, +1, now, 1); if (r) when = 'RISES ' + tfmt(r.date); }
-          sk.push(evRow('planet', '#ffd37a', p.name, when, '', `MAG ${p.mag.toFixed(1)}${p.v ? ' · ' + cardinal(azOf(p.v)) + ' · ' + Math.round(altOf(p.v)) + '°' : ''}`));
+          sk.push(evGo('planet:' + p.name, 'planet', '#ffd37a', p.name, when, '', `MAG ${p.mag.toFixed(1)}${p.v ? ' · ' + cardinal(azOf(p.v)) + ' · ' + Math.round(altOf(p.v)) + '°' : ''}`));
         }
         const mr = A.SearchRiseSet('Moon', ob, +1, now, 1), ms = A.SearchRiseSet('Moon', ob, -1, now, 1);
-        sk.unshift(evRow('moon', '#c9d6f5', moonPhaseName(MOON.phase), Math.round(MOON.frac * 100) + '% LIT', MOON.frac > 0.6 ? 'A bright Moon washes out faint satellites and meteors.' : 'A dim Moon means darker skies.', `${mr ? 'RISES ' + tfmt(mr.date) : ''}${mr && ms ? ' · ' : ''}${ms ? 'SETS ' + tfmt(ms.date) : ''}`));
+        sk.unshift(evGo('moon', 'moon', '#c9d6f5', moonPhaseName(MOON.phase), Math.round(MOON.frac * 100) + '% LIT', MOON.frac > 0.6 ? 'A bright Moon washes out faint satellites and meteors.' : 'A dim Moon means darker skies.', `${mr ? 'RISES ' + tfmt(mr.date) : ''}${mr && ms ? ' · ' : ''}${ms ? 'SETS ' + tfmt(ms.date) : ''}`));
       } catch (e) { /* ignore */ }
     }
     // meteors
@@ -2215,7 +2239,7 @@
       const lst = gmst(now) + o.lon * D2R, p0 = precess(sh.ra, sh.dec, now);
       const hToTransit = wrap360((p0.ra - lst) * R2D) / 15 / 1.0027379;
       const transit = new Date(now.getTime() + hToTransit * 3600e3);
-      sk.push(evRow('meteor', '#ffb45a', sh.name, days === 0 ? 'PEAKS TONIGHT' : days > 0 ? 'PEAK IN ' + days + ' D' : 'ACTIVE', `${isAct ? 'Active now. ' : ''}Up to ~${sh.zhr} an hour under a dark sky. The radiant is highest around ${tfmt(transit)}.`, `PEAK ${sh.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase()} · ${sh.v} KM/S · FROM ${esc(sh.parent.toUpperCase())}`));
+      sk.push(evGo('shower:' + sh.name, 'meteor', '#ffb45a', sh.name, days === 0 ? 'PEAKS TONIGHT' : days > 0 ? 'PEAK IN ' + days + ' D' : 'ACTIVE', `${isAct ? 'Active now. ' : ''}Up to ~${sh.zhr} an hour under a dark sky. The radiant is highest around ${tfmt(transit)}.`, `PEAK ${sh.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase()} · ${sh.v} KM/S · FROM ${esc(sh.parent.toUpperCase())}`));
     }
     // aurora
     const kp = await cachedJSON('kp', 'https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json', 3 * 3600e3);
@@ -2239,6 +2263,7 @@
     const b = $('#evBadge'); b.hidden = !evCount; b.textContent = evCount;
   }
   function wireTonight() {
+    $$('#tonightBody [data-go]').forEach(el => { el.onclick = () => goTo(el.dataset.go); el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goTo(el.dataset.go); } }; });
     $$('[data-cal]').forEach(b => b.onclick = () => { if (S.bestPass) passToCalendar(S.bestPass.s, S.bestPass.p); });
     $$('[data-remind]').forEach(b => b.onclick = () => { const [id, t, az] = b.dataset.remind.split(':').map(Number); const s = Sats.byId.get(id); if (s) addAlarm(s, { vStart: t, vStartAz: az }); });
     $$('[data-preview]').forEach(b => b.onclick = () => { closeSheets(); setOffset(+b.dataset.preview - Date.now()); const s = Sats.byId.get(+b.dataset.sel); if (s) select(s); toast('Previewing the pass at its highest point. Tap LIVE to return.'); });

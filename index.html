@@ -245,6 +245,9 @@ body.red .hero { background: rgba(40,0,0,0.5); }
 .conds span:first-child { font-size: 9px; font-weight: 700; letter-spacing: 1.2px; color: var(--dim); }
 .conds span:last-child { font-family: var(--mono); font-size: 13.5px; font-weight: 600; }
 .event { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.event.go { cursor: pointer; position: relative; padding-right: 22px; border-radius: 8px; }
+.event.go::after { content: "›"; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 22px; color: var(--dim); }
+.event.go:active { background: rgba(255,255,255,0.05); }
 .event:last-child { border-bottom: none; }
 .event .ico { width: 34px; height: 34px; border-radius: 10px; flex: none; display: grid; place-items: center; }
 .event .ico svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -375,8 +378,8 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=7"></script>
-<script src="deep.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="stars.js?v=8"></script>
+<script src="deep.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
