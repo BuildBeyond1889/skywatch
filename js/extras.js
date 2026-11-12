@@ -345,7 +345,7 @@ function jumpRows() {
 function buildJumpGrid() {
   const cats = [['all', 'All']].concat(PLACE_CATS.map(c => [c[0], c[1]]));
   $('#jumpCats').innerHTML = cats.map(([id, nm]) => `<button type="button" class="chip" data-c="${id}" aria-pressed="${JUMP.cat === id}">${esc(nm)}</button>`).join('');
-  $$('#jumpCats button').forEach(b => b.onclick = () => { JUMP.cat = b.dataset.c; ls.set('jumpCat', JUMP.cat); buildJumpGrid(); $('#jumpList').scrollTop = 0; });
+  $$('#jumpCats button').forEach(b => b.onclick = () => { JUMP.cat = b.dataset.c; ls.set('jumpCat', JUMP.cat); buildJumpGrid(); const sb = $('#sheetJump .sheet-body'); if (sb) sb.scrollTop = 0; });
   const rows = jumpRows();
   $('#jumpList').innerHTML = (S.travel ? '<button type="button" class="srch-row" data-j="home"><span><b>↩ Back home</b></span><span>YOUR OWN LOCATION</span></button>' : '') +
     rows.map((r, i) => `<button type="button" class="srch-row" data-j="${i}"><span><b>${esc(r.p[0])}</b><small class="muted" style="display:block;font-size:11.5px">${esc(r.p[1])}</small></span><span>${r.cat && JUMP.cat === 'all' ? esc(r.cat.toUpperCase()) : typeof r.p[2] === 'number' ? Math.abs(r.p[2]).toFixed(1) + '°' + (r.p[2] < 0 ? 'S' : 'N') + ' ' + Math.abs(r.p[3]).toFixed(1) + '°' + (r.p[3] < 0 ? 'W' : 'E') : ''}</span></button>`).join('') +
@@ -359,7 +359,7 @@ function buildJumpGrid() {
     jumpTo(p[2], p[3], p[0], p[1]);
   });
 }
-$('#worldPill').addEventListener('click', () => setTimeout(buildJumpGrid, 50));
+$('#jumpOpen').onclick = () => { closeSheets(); buildJumpGrid(); setTimeout(() => openSheet('sheetJump'), 60); };
 buildJumpGrid();
 $('#jumpQ').addEventListener('input', () => { JUMP.q = $('#jumpQ').value.trim(); $('#jumpRes').innerHTML = ''; buildJumpGrid(); });
 $('#jumpForm').onsubmit = async e => {

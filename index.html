@@ -231,7 +231,10 @@ body.photo #sky { background: transparent; }
 .jumpcats .chip { flex: none; background: rgba(255,255,255,.06); border: 1px solid var(--line); color: var(--fg); }
 .jumpcats .chip[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); border-color: transparent; }
 #jumpQ { height: 42px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--fg); padding: 0 12px; font: 400 16px Inter, system-ui, sans-serif; }
-.jumplist { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
+.jumptop { position: sticky; top: -1px; z-index: 2; background: var(--panel-solid); padding: 6px 0 6px; }
+#sheetJump { height: 88%; }
+.jumpopen { width: 100%; margin-top: 16px; display: grid; grid-template-columns: 1fr auto; text-align: left; gap: 2px 10px; padding: 14px 16px; border-radius: 16px; border: 1px solid var(--line); background: rgba(90,209,255,.08); color: var(--fg); }
+.jumpopen b { font-size: 15px; } .jumpopen small { grid-column: 1; color: #93a3c9; font-size: 12px; } .jumpopen span { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 22px; opacity: .7; }
 .jumplist .srch-row { width: 100%; text-align: left; }
 .jumpgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .jumpgrid button { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--fg); min-height: 56px; }
@@ -414,14 +417,22 @@ a { color: var(--accent); }
   <div class="sheet-body" id="tonightBody"></div>
 </section>
 
+<section class="sheet" id="sheetJump" aria-label="Jump anywhere" aria-hidden="true">
+  <div class="sheet-head"><h2>Jump anywhere</h2><button type="button" class="btn small" data-close>Done</button></div>
+  <div class="sheet-body">
+    <div class="jumptop">
+    <form id="jumpForm" class="row" style="gap:8px;flex-wrap:nowrap"><label for="jumpQ" class="sr-only">Place, or latitude, longitude</label><input id="jumpQ" type="search" placeholder="A town, or 48.88, -123.39" autocomplete="off" style="flex:1;min-width:0"><button type="submit" class="btn small primary">Go</button></form>
+    <div class="chips jumpcats" id="jumpCats"></div><div class="mono muted" id="jumpCount" style="font-size:10px;margin:2px 0 0"></div>
+    </div>
+    <div class="srch" id="jumpRes"></div>
+    <div class="srch jumplist" id="jumpList"></div>
+  </div>
+</section>
+
 <section class="sheet" id="sheetWorlds" aria-label="Worlds" aria-hidden="true">
   <div class="sheet-head"><h2>Explore</h2><button type="button" class="btn small" data-close>Done</button></div>
   <div class="sheet-body"><div class="wtiles" id="worldSheetTiles"></div>
-    <h3 style="margin:18px 0 4px">Jump anywhere</h3>
-    <p class="muted" style="margin:0 0 10px">See the live sky, satellites and radio from any spot on Earth.</p>
-    <form id="jumpForm" class="row" style="gap:8px;flex-wrap:nowrap"><label for="jumpQ" class="sr-only">Place, or latitude, longitude</label><input id="jumpQ" type="search" placeholder="A town, or 48.88, -123.39" autocomplete="off" style="flex:1;min-width:0"><button type="submit" class="btn small primary">Go</button></form>
-    <div class="srch" id="jumpRes"></div>
-    <div class="chips jumpcats" id="jumpCats"></div><div class="mono muted" id="jumpCount" style="font-size:10px;margin:6px 0 4px"></div><div class="srch jumplist" id="jumpList"></div>
+    <button type="button" class="jumpopen" id="jumpOpen"><b>🌍 Jump anywhere</b><small>See the live sky, satellites and radio from 165 places, or any spot you search</small><span aria-hidden="true">›</span></button>
   </div>
 </section>
 
@@ -460,19 +471,19 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=28"></script>
-<script src="deep.js?v=28"></script>
-<script src="js/geomag.js?v=28"></script>
-<script src="js/core.js?v=28"></script>
-<script src="js/data.js?v=28"></script>
-<script src="js/view.js?v=28"></script>
-<script src="js/render.js?v=28"></script>
-<script src="js/cards.js?v=28"></script>
-<script src="js/sensing.js?v=28"></script>
-<script src="js/ui.js?v=28"></script>
-<script src="js/worlds.js?v=28"></script>
-<script src="js/main.js?v=28"></script>
-<script src="js/places.js?v=28"></script>
-<script src="js/extras.js?v=28"></script>
+<script src="stars.js?v=29"></script>
+<script src="deep.js?v=29"></script>
+<script src="js/geomag.js?v=29"></script>
+<script src="js/core.js?v=29"></script>
+<script src="js/data.js?v=29"></script>
+<script src="js/view.js?v=29"></script>
+<script src="js/render.js?v=29"></script>
+<script src="js/cards.js?v=29"></script>
+<script src="js/sensing.js?v=29"></script>
+<script src="js/ui.js?v=29"></script>
+<script src="js/worlds.js?v=29"></script>
+<script src="js/main.js?v=29"></script>
+<script src="js/places.js?v=29"></script>
+<script src="js/extras.js?v=29"></script>
 </body>
 </html>
