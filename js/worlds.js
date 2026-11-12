@@ -481,10 +481,7 @@ WORLDS.infra = (() => {
         }
         cardFor = null;
       }));
-    // 1. TV, radio and other big towers out to about 100 miles (a bounding box is much faster for the map server than a radius)
-    st.status.far = 'loading'; cardFor = null;
-    queue(() => overpass('infraFar2:' + key, `[out:json][timeout:30][bbox:${bb(160)}];(nwr["man_made"~"^(mast|tower)$"]["tower:type"~"broadcast|radio|television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:television"];nwr["man_made"~"^(mast|tower|communications_tower)$"]["communication:radio"];nwr["man_made"="communications_tower"];nwr["man_made"="mast"]["height"~"^([1-9][0-9][0-9]|[6-9][0-9])"];);out center tags 600;`, 14 * 864e5)
-      .then(j => towersDone(j, false, 'far')));
+    // (big broadcast towers now come from FCC licence data, so the slow 100-mile map query is gone)
   }
   // geostationary and navigation satellites (computed here every second)
   function satsOf(gid) { return Sats.list.filter(s => s.groups.has(gid)); }
@@ -595,7 +592,7 @@ WORLDS.infra = (() => {
         ${st.stations.length ? `<details id="radioDial"${st.dialOpen ? ' open' : ''}><summary class="mono" style="cursor:pointer;font-size:11px;letter-spacing:.06em">RADIO DIAL · ${st.stations.filter(x => x.band !== 'TV').length} STATIONS · ${st.stations.filter(x => x.band === 'TV').length} TV</summary>
           <div class="seg" id="dialSeg">${['FM', 'AM', 'TV'].map(b => `<button type="button" data-b="${b}" aria-pressed="${st.dial === b}">${b}</button>`).join('')}</div>
           <div class="srch" style="max-height:220px;overflow:auto">${st.stations.filter(x => x.band === st.dial).sort((a, b) => a.freq - b.freq).map(sn => `<button type="button" class="srch-row" data-sn="${st.stations.indexOf(sn)}"><span><b>${st.dial === 'TV' ? 'CH ' + sn.freq : sn.freq + (st.dial === 'AM' ? ' kHz' : '')}</b> ${esc(sn.call)}${sn.city ? ' · ' + esc(sn.city) : ''}</span><span>${kmTxt(sn.dist)} ${cardinal(bearingTo(S.obs.lat, S.obs.lon, sn.lat, sn.lon))}</span></button>`).join('') || '<p class="muted" style="margin:0">None found nearby.</p>'}</div></details>` : ''}
-        <div class="muted mono" style="font-size:10px">${[['fccCell', 'FCC CELL SITES'], ['fccBroadcast', 'FCC FM/AM/TV'], ['near', 'OSM MASTS'], ['far', 'OSM BIG TOWERS'], ['power', 'OSM POWER']].map(([k, n]) => n + ' ' + (s[k] === 'ok' ? '✓' : s[k] === 'error' ? '✕' : '…')).join(' · ')}</div>
+        <div class="muted mono" style="font-size:10px">${[['fccCell', 'FCC CELL SITES'], ['fccBroadcast', 'FCC FM/AM/TV'], ['near', 'OSM MASTS'], ['power', 'OSM POWER']].map(([k, n]) => n + ' ' + (s[k] === 'ok' ? '✓' : s[k] === 'error' ? '✕' : '…')).join(' · ')}</div>
         ${bad ? '<div class="card-actions"><button type="button" class="btn small" id="infraRetry">Some sources failed. Try again</button></div>' : ''}
         <span class="muted" style="font-size:11px">Towers: FCC licence data via HIFLD, plus OpenStreetMap. Power: © OpenStreetMap contributors.</span>`;
     },
