@@ -670,7 +670,8 @@
       if (S.mode === 'ar' && S.started && !S.gotOrient && nowP - S.arStart > 4000 && !S.noSensorWarned) {
         S.noSensorWarned = true;
         toast('No motion sensors found. Drag to look around instead.', 4000);
-        S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera();
+        S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera(); updateModeBtn();
+        toast('Tap Camera at the top to try camera view again.', 4000);
       }
       if (!S.dragging && (S.dragYaw || S.dragPitch)) {
         const k = 1 - Math.pow(0.001, dt);
@@ -1757,8 +1758,8 @@
   $('#tonightBtn').onclick = () => openSheet('sheetTonight');
   $('#gearBtn').onclick = () => openSheet('sheetSettings');
   $('#galleryBtn').onclick = () => openSheet('sheetGallery');
-  $('#alignBtn').onclick = () => setAlign(!S.align);
-  $('#lockChip').onclick = () => setAlign(true);
+  $('#alignBtn').onclick = () => { if (S.mode === 'ar') setAlign(!S.align); else enterAR(); };
+  $('#lockChip').onclick = () => { if (S.mode === 'ar') setAlign(true); else enterAR(); };
   $('#redBtn').onclick = () => {
     S.red = !S.red; document.body.classList.toggle('red', S.red); $('#redBtn').setAttribute('aria-pressed', S.red);
     const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = S.red ? '#000000' : '#02030a';
@@ -2022,7 +2023,7 @@
     $('#start').classList.add('gone'); setTimeout(() => { $('#start').hidden = true; }, 600);
     S.started = true; resize(); keepAwake();
   }
-  $('#startAR').onclick = async () => {
+  async function enterAR() {
     // iOS needs the motion permission requested inside the tap
     try {
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -2030,20 +2031,44 @@
         if (r !== 'granted') { toast('Motion access was declined, so camera view cannot follow your phone. Using sky view.', 5000); return startSkyMode(); }
       }
     } catch (e) { /* not iOS */ }
-    startSensors();
+    if (!S.sensorsOn) { startSensors(); S.sensorsOn = true; }
+    stopCamera();
     try { await startCamera(); }
-    catch (e) { toast('Camera unavailable: ' + (e.message || e.name) + '. Using sky view.', 5000); return startSkyMode(); }
+    catch (e) { toast('Camera unavailable: ' + String(e.message || e.name).replace(/\.$/, '') + '. Using sky view.', 5000); return startSkyMode(); }
     S.mode = 'ar'; document.body.classList.add('ar'); S.lastOrient = performance.now(); S.arStart = performance.now();
-    showHUD(); requestGPS();
-  };
+    S.gotOrient = false; S.noSensorWarned = false; S.q = null; S.qT = null; S.dragYaw = 0; S.dragPitch = 0; S.zoom = 1;
+    cam.classList.toggle('nofeed', S.noFeed);
+    const first = !S.started;
+    showHUD(); updateModeBtn();
+    if (first) requestGPS(); else toast('Camera view is back.');
+  }
+  $('#startAR').onclick = enterAR;
+  // In sky view the pill next to the status chip turns into a "Camera" button that restarts camera view.
+  function updateModeBtn() {
+    const b = $('#alignBtn');
+    if (S.mode === 'ar') { b.textContent = 'Align'; b.setAttribute('aria-label', 'Align with a star'); }
+    else { b.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" style="stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px;margin-right:6px"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Camera'; b.setAttribute('aria-label', 'Switch to camera view'); }
+  }
   function startSkyMode() {
     S.mode = 'sky'; document.body.classList.remove('ar'); cam.hidden = true; stopCamera();
-    showHUD(); requestGPS();
+    const first = !S.started;
+    showHUD(); updateModeBtn(); if (first) requestGPS();
   }
   $('#startSky').onclick = startSkyMode;
 
   // service worker for offline use
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    const hadSW = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadSW || reloaded) return;
+      reloaded = true;
+      if (!S.started) location.reload(); else toast('Sky Watch updated. Close and reopen it to get the new version.', 5000);
+    });
+  }
 
   // boot
   (async function boot() {
