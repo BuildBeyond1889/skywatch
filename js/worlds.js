@@ -452,6 +452,24 @@ WORLDS.infra = (() => {
     });
   }
   const carrier = t => /cellco|verizon/i.test(t) ? 'Verizon' : /cingular|at&t|at & t/i.test(t) ? 'AT&T' : /t-mobile|sprint|omnipoint|voicestream/i.test(t) ? 'T-Mobile' : /dish|boost/i.test(t) ? 'Boost/Dish' : /us cellular|united states cellular/i.test(t) ? 'UScellular' : titleCase(t);
+  // Find a station in radio-browser.info, the directory Lu Cube's radio search uses, so we can hand over the exact name to search.
+  const RBH = ['de1.api.radio-browser.info', 'de2.api.radio-browser.info', 'fi1.api.radio-browser.info', 'nl1.api.radio-browser.info'];
+  async function rbLookup(sn) {
+    const base = sn.call.split('-')[0].toUpperCase(), key = 'rb:' + sn.call;
+    const c = ls.get(key, null); if (c && Date.now() - c.t < 30 * 864e5) return c.r;
+    let r = null;
+    for (const h of RBH) {
+      try {
+        const res = await fetch(`https://${h}/json/stations/search?name=${encodeURIComponent(base)}&countrycode=US&hidebroken=true&order=clickcount&reverse=true&limit=12`);
+        if (!res.ok) continue;
+        const list = await res.json(), word = new RegExp('(^|[^A-Z])' + base + '([^A-Z]|$)');
+        const hit = list.find(x => word.test((x.name || '').toUpperCase()) && (!sn.freq || sn.band !== 'FM' || !/\d{2,3}\.\d/.test(x.name) || (x.name || '').includes(String(sn.freq)))) || list.find(x => word.test((x.name || '').toUpperCase()));
+        r = hit ? { name: hit.name.trim(), state: hit.state || '' } : false; break;
+      } catch (e) { /* try the next server */ }
+    }
+    if (r !== null) ls.set(key, { t: Date.now(), r });
+    return r;
+  }
   const titleCase = t => t.toLowerCase().replace(/\b([a-z])/g, m => m.toUpperCase()).replace(/\b(Llc|Inc|Lp|Usa|Ii|Iii)\b/g, m => m.toUpperCase());
   async function load(force) {
     for (const gid of ['geo', 'gnss']) if (!Sats.status[gid]) loadGroup(gid);
@@ -565,7 +583,8 @@ WORLDS.infra = (() => {
     if (o.kind === 'tower') {
       const t = o.tags || {}, d = Math.hypot(...(o.v || [0, 0, 0]));
       const extra = ['height', 'communication:mobile_phone', 'communication:television', 'communication:radio', 'communication:microwave'].filter(k => t[k]).map(k => `<div class="kv"><span>${esc(k.replace('communication:', '').replace('_', ' '))}</span><span>${esc(t[k])}</span></div>`).join('');
-      return close + `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">${esc(o.type.toUpperCase())}${o.op ? ' · ' + esc(o.op.toUpperCase()) : ''}</div></div></div><div class="stats">${stat('AWAY', fmt(dv(d).toFixed(1)), du())}${stat('BEARING', azOf(o.v || [0, 1, 0]).toFixed(0), '°')}${stat('HEIGHT', Math.round(o.h), 'm')}${stat('ELEV', altOf(o.v || [0, 1, 0]).toFixed(1), '°')}</div>${extra ? '<div class="about">' + extra + '</div>' : ''}${o === servingTower() ? `<div class="card-foot"><span><b>Probably your phone’s tower.</b> It’s the nearest ${esc(st.carrier || 'cell')} site. Phones usually connect to the closest site with a clear path, but busy or blocked sites hand you to the next one.</span></div>` : ''}${(() => { const ss = st.stations.filter(sn => towerOf(sn) === o).sort((a, b) => a.band.localeCompare(b.band) || a.freq - b.freq); return ss.length ? `<div class="srch">${ss.map(sn => `<div class="srch-row"><span><b>${sn.band === 'TV' ? 'CH ' + sn.freq : sn.freq + (sn.band === 'AM' ? ' kHz' : ' MHz')}</b> ${esc(sn.call)}</span><span>${esc(sn.band)}${sn.city ? ' · ' + esc(sn.city.toUpperCase()) : ''}</span></div>`).join('')}</div>` : o.calls && o.calls.length > 1 ? `<div class="card-foot"><span>Licences on this tower: ${esc(o.calls.join(', '))}</span></div>` : ''; })()}${o.ops && o.ops.length > 1 ? `<div class="card-foot"><span>Operators: ${esc(o.ops.join(', '))}</span></div>` : ''}<span class="muted" style="font-size:11px">${o.src === 'FCC' ? 'FCC licence data (via HIFLD). Positions are where the licence says the antenna is.' : 'Map data © OpenStreetMap contributors. Not every mast is mapped.'}</span>`;
+      return close + `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">${esc(o.type.toUpperCase())}${o.op ? ' · ' + esc(o.op.toUpperCase()) : ''}</div></div></div><div class="stats">${stat('AWAY', fmt(dv(d).toFixed(1)), du())}${stat('BEARING', azOf(o.v || [0, 1, 0]).toFixed(0), '°')}${stat('HEIGHT', Math.round(o.h), 'm')}${stat('ELEV', altOf(o.v || [0, 1, 0]).toFixed(1), '°')}</div>${extra ? '<div class="about">' + extra + '</div>' : ''}${o === servingTower() ? `<div class="card-foot"><span><b>Probably your phone’s tower.</b> It’s the nearest ${esc(st.carrier || 'cell')} site. Phones usually connect to the closest site with a clear path, but busy or blocked sites hand you to the next one.</span></div>` : ''}${(() => { const ss = st.stations.filter(sn => towerOf(sn) === o).sort((a, b) => a.band.localeCompare(b.band) || a.freq - b.freq); for (const sn of ss) if (sn.band !== 'TV' && sn.rb === undefined) { sn.rb = 'busy'; rbLookup(sn).then(r => { sn.rb = r; cardFor = null; }); }
+        return ss.length ? `<div class="srch">${ss.map(sn => `<div class="srch-row" style="flex-wrap:wrap;row-gap:6px"><span><b>${sn.band === 'TV' ? 'CH ' + sn.freq : sn.freq + (sn.band === 'AM' ? ' kHz' : ' MHz')}</b> ${esc(sn.call)}</span><span>${esc(sn.band)}${sn.city ? ' · ' + esc(sn.city.toUpperCase()) : ''}</span>${sn.band === 'TV' ? '' : sn.rb && sn.rb.name ? `<span style="flex-basis:100%;display:flex;gap:8px;align-items:center"><span class="mono" style="font-size:10px;color:#ffc21a">LU CUBE SEARCH</span><span style="user-select:text;-webkit-user-select:text;flex:1;min-width:0">${esc(sn.rb.name)}</span><button type="button" class="btn small" data-copy="${esc(sn.rb.name)}">COPY</button></span>` : `<span class="mono muted" style="flex-basis:100%;font-size:10px">${sn.rb === 'busy' ? 'LOOKING FOR ITS ONLINE STREAM…' : sn.rb === false ? 'AIR ONLY · NO ONLINE STREAM FOUND' : 'COULDN’T CHECK FOR AN ONLINE STREAM'}</span>`}</div>`).join('')}</div><div class="muted" style="font-size:11px">Copy a name, then search it in Lu Cube’s radio (🔎).</div>` : o.calls && o.calls.length > 1 ? `<div class="card-foot"><span>Licences on this tower: ${esc(o.calls.join(', '))}</span></div>` : ''; })()}${o.ops && o.ops.length > 1 ? `<div class="card-foot"><span>Operators: ${esc(o.ops.join(', '))}</span></div>` : ''}<span class="muted" style="font-size:11px">${o.src === 'FCC' ? 'FCC licence data (via HIFLD). Positions are where the licence says the antenna is.' : 'Map data © OpenStreetMap contributors. Not every mast is mapped.'}</span>`;
     }
     if (o.kind === 'power' || o.kind === 'sub' || o.kind === 'dc') {
       const d = Math.hypot(...(o.v || [0, 0, 0]));
@@ -597,6 +616,15 @@ WORLDS.infra = (() => {
         <span class="muted" style="font-size:11px">Towers: FCC licence data via HIFLD, plus OpenStreetMap. Power: © OpenStreetMap contributors.</span>`;
     },
     homeCompact() { const tw = st.towers.find(x => x.type !== 'Cell / radio mast'); return `<button type="button" class="mini"><b>${st.towers.length} towers</b><span class="mono">${tw ? 'NEAREST BROADCAST ' + kmTxt(tw.dist) : Object.values(st.status).includes('loading') ? 'LOADING MAP DATA…' : 'TAP FOR DETAILS'}</span></button>`; },
+    wire(card) {
+      $$('[data-copy]', card).forEach(b => b.onclick = async e => {
+        e.stopPropagation(); const txt = b.dataset.copy; let ok = false;
+        try { await navigator.clipboard.writeText(txt); ok = true; } catch (er) { /* fall back below */ }
+        if (!ok) { try { const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch (er) { /* ignore */ } }
+        b.textContent = ok ? 'COPIED ✓' : 'SELECT IT'; toast(ok ? 'Copied “' + txt + '”. Search it in Lu Cube’s radio.' : 'Press and hold the name to copy it.');
+        try { navigator.vibrate && navigator.vibrate(12); } catch (er) { /* ignore */ }
+      });
+    },
     wireHome(card) {
       $$('[data-tw]', card).forEach(b => b.onclick = () => { const x = st.towers[+b.dataset.tw]; if (!x) return; x.v = geoEnu(x.lat, x.lon, x.h / 1000); select(x); if (S.mode === 'sky') { S.viewAz = azOf(x.v); S.viewAlt = 2; S.zoom = 3; } });
       const r = $('#infraRetry', card); if (r) r.onclick = () => { load(true); };
