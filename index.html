@@ -226,6 +226,13 @@ body.photo #sky { background: transparent; }
 #travelPill { position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--st) + 190px); z-index: 45; display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 12px; border-radius: 999px; max-width: calc(100vw - 24px); }
 #travelPill span { font-size: 10px; letter-spacing: .06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #travelPill button { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--fg); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.jumpcats { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0 2px; scrollbar-width: none; }
+.jumpcats { min-height: 46px; align-items: center; }
+.jumpcats .chip { flex: none; background: rgba(255,255,255,.06); border: 1px solid var(--line); color: var(--fg); }
+.jumpcats .chip[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); border-color: transparent; }
+#jumpQ { height: 42px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--fg); padding: 0 12px; font: 400 16px Inter, system-ui, sans-serif; }
+.jumplist { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
+.jumplist .srch-row { width: 100%; text-align: left; }
 .jumpgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .jumpgrid button { text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--fg); min-height: 56px; }
 .jumpgrid button b { display: block; font-size: 13px; }
@@ -414,7 +421,7 @@ a { color: var(--accent); }
     <p class="muted" style="margin:0 0 10px">See the live sky, satellites and radio from any spot on Earth.</p>
     <form id="jumpForm" class="row" style="gap:8px;flex-wrap:nowrap"><label for="jumpQ" class="sr-only">Place, or latitude, longitude</label><input id="jumpQ" type="search" placeholder="A town, or 48.88, -123.39" autocomplete="off" style="flex:1;min-width:0"><button type="submit" class="btn small primary">Go</button></form>
     <div class="srch" id="jumpRes"></div>
-    <div class="jumpgrid" id="jumpGrid"></div>
+    <div class="chips jumpcats" id="jumpCats"></div><div class="mono muted" id="jumpCount" style="font-size:10px;margin:6px 0 4px"></div><div class="srch jumplist" id="jumpList"></div>
   </div>
 </section>
 
@@ -453,18 +460,19 @@ a { color: var(--accent); }
   </div>
 </div>
 
-<script src="stars.js?v=27"></script>
-<script src="deep.js?v=27"></script>
-<script src="js/geomag.js?v=27"></script>
-<script src="js/core.js?v=27"></script>
-<script src="js/data.js?v=27"></script>
-<script src="js/view.js?v=27"></script>
-<script src="js/render.js?v=27"></script>
-<script src="js/cards.js?v=27"></script>
-<script src="js/sensing.js?v=27"></script>
-<script src="js/ui.js?v=27"></script>
-<script src="js/worlds.js?v=27"></script>
-<script src="js/main.js?v=27"></script>
-<script src="js/extras.js?v=27"></script>
+<script src="stars.js?v=28"></script>
+<script src="deep.js?v=28"></script>
+<script src="js/geomag.js?v=28"></script>
+<script src="js/core.js?v=28"></script>
+<script src="js/data.js?v=28"></script>
+<script src="js/view.js?v=28"></script>
+<script src="js/render.js?v=28"></script>
+<script src="js/cards.js?v=28"></script>
+<script src="js/sensing.js?v=28"></script>
+<script src="js/ui.js?v=28"></script>
+<script src="js/worlds.js?v=28"></script>
+<script src="js/main.js?v=28"></script>
+<script src="js/places.js?v=28"></script>
+<script src="js/extras.js?v=28"></script>
 </body>
 </html>

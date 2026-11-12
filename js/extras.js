@@ -306,21 +306,13 @@ async function savePhoto() {
 }
 
 // ===================== Jump anywhere =====================
-const PLACES = [
-  ['Point Nemo', 'Farthest point from any land', -48.8767, -123.3933], ['Middle of the Sahara', 'Algeria–Niger border, no lights for 500 km', 21.5, 8.5],
-  ['South Pole', 'Amundsen–Scott Station', -89.99, 0], ['North Pole', 'The top of the world', 89.99, 0],
-  ['Mount Everest', 'Summit, 8,849 m', 27.9881, 86.925], ['Atacama Desert', 'Darkest, driest skies (ALMA)', -23.03, -67.75],
-  ['Cape Canaveral', 'Launch pads 39A and 40', 28.573, -80.649], ['Baikonur', 'Where Soyuz launches', 45.92, 63.34],
-  ['Mauna Kea', 'Observatories above the clouds', 19.8207, -155.4681], ['Tokyo', 'Shibuya Crossing', 35.6595, 139.7005],
-  ['Svalbard', 'Aurora under polar night', 78.2232, 15.6267], ['Middle of the Pacific', 'Halfway between Hawaii and Japan', 30, -170]
-];
-function jumpTo(lat, lon, name) {
+function jumpTo(lat, lon, name, about) {
   if (!S.travel && S.obs) S.home = S.home || [S.obs.lat, S.obs.lon, S.locSource];
   S.travel = { name, lat, lon };
   setLocation(lat, lon, 'jump'); closeSheets();
   if (S.mode === 'sky') { S.viewAlt = 45; S.zoom = 1; }
   $('#travelPill').hidden = false; updateTravel();
-  toast('You’re at ' + name + '. The sky, satellites and radio are live for this spot.' + (S.mode === 'ar' ? ' Your phone is now a window onto its sky.' : ''), 4500);
+  toast('You’re at ' + name + (about ? ': ' + about : '') + '. The sky, satellites and radio are live for this spot.' + (S.mode === 'ar' ? ' Your phone is now a window onto its sky.' : ''), 4500);
 }
 function updateTravel() {
   if (!S.travel) return;
@@ -338,19 +330,38 @@ function issUnder() {
   const s = Sats.byId.get(25544); if (!s || !window.satellite) return null;
   try { const rec = s.rec || (s.rec = satellite.twoline2satrec(s.l1, s.l2)), now = simNow(), pv = satellite.propagate(rec, now); if (!pv.position) return null; const gd = satellite.eciToGeodetic(pv.position, satellite.gstime(now)); return [satellite.degreesLat(gd.latitude), satellite.degreesLong(gd.longitude)]; } catch (e) { return null; }
 }
+// The places list: category chips, a filter that narrows as you type, one scrolling list.
+const JUMP = { cat: ls.get('jumpCat', 'all'), q: '' };
+const JUMP_SPECIAL = [['Under the ISS', 'Right now, as it flies over', 'iss'], ['Random spot', 'Anywhere on Earth', 'rand']];
+function jumpRows() {
+  const q = JUMP.q.toLowerCase(), rows = [];
+  if (!q && (JUMP.cat === 'all' || JUMP.cat === 'special')) JUMP_SPECIAL.forEach(p => rows.push({ p, cat: '' }));
+  for (const [id, nm, list] of PLACE_CATS) {
+    if (!q && JUMP.cat !== 'all' && JUMP.cat !== id) continue;
+    for (const p of list) if (!q || (p[0] + ' ' + p[1]).toLowerCase().includes(q)) rows.push({ p, cat: nm });
+  }
+  return rows;
+}
 function buildJumpGrid() {
-  $('#jumpGrid').innerHTML = [['Under the ISS', 'Right now, as it flies over', 'iss'], ['Random spot', 'Anywhere on Earth', 'rand']].concat(PLACES).map((p, i) => `<button type="button" data-j="${i}"><b>${esc(p[0])}</b><small>${esc(p[1])}</small></button>`).join('') + (S.travel ? '<button type="button" data-j="home"><b>↩ Back home</b><small>Your own location</small></button>' : '');
-  const all = [['Under the ISS', '', 'iss'], ['Random spot', '', 'rand']].concat(PLACES);
-  $$('#jumpGrid button').forEach(b => b.onclick = () => {
+  const cats = [['all', 'All']].concat(PLACE_CATS.map(c => [c[0], c[1]]));
+  $('#jumpCats').innerHTML = cats.map(([id, nm]) => `<button type="button" class="chip" data-c="${id}" aria-pressed="${JUMP.cat === id}">${esc(nm)}</button>`).join('');
+  $$('#jumpCats button').forEach(b => b.onclick = () => { JUMP.cat = b.dataset.c; ls.set('jumpCat', JUMP.cat); buildJumpGrid(); $('#jumpList').scrollTop = 0; });
+  const rows = jumpRows();
+  $('#jumpList').innerHTML = (S.travel ? '<button type="button" class="srch-row" data-j="home"><span><b>↩ Back home</b></span><span>YOUR OWN LOCATION</span></button>' : '') +
+    rows.map((r, i) => `<button type="button" class="srch-row" data-j="${i}"><span><b>${esc(r.p[0])}</b><small class="muted" style="display:block;font-size:11.5px">${esc(r.p[1])}</small></span><span>${r.cat && JUMP.cat === 'all' ? esc(r.cat.toUpperCase()) : typeof r.p[2] === 'number' ? Math.abs(r.p[2]).toFixed(1) + '°' + (r.p[2] < 0 ? 'S' : 'N') + ' ' + Math.abs(r.p[3]).toFixed(1) + '°' + (r.p[3] < 0 ? 'W' : 'E') : ''}</span></button>`).join('') +
+    (!rows.length ? '<p class="muted" style="margin:8px 0">Not in the list. Press Go to search the whole world.</p>' : '');
+  $('#jumpCount').textContent = rows.length + ' PLACES';
+  $$('#jumpList [data-j]').forEach(b => b.onclick = () => {
     const k = b.dataset.j; if (k === 'home') { closeSheets(); goHome(); return; }
-    const p = all[+k];
+    const p = rows[+k].p;
     if (p[2] === 'iss') { const ll = issUnder(); if (!ll) { toast('The ISS isn’t loaded yet.'); return; } jumpTo(ll[0], ll[1], 'Under the ISS'); S.viewAlt = 85; return; }
     if (p[2] === 'rand') { const la = Math.asin(Math.random() * 2 - 1) * R2D, lo = Math.random() * 360 - 180; jumpTo(la, lo, la.toFixed(1) + '°, ' + lo.toFixed(1) + '°'); return; }
-    jumpTo(p[2], p[3], p[0]);
+    jumpTo(p[2], p[3], p[0], p[1]);
   });
 }
 $('#worldPill').addEventListener('click', () => setTimeout(buildJumpGrid, 50));
 buildJumpGrid();
+$('#jumpQ').addEventListener('input', () => { JUMP.q = $('#jumpQ').value.trim(); $('#jumpRes').innerHTML = ''; buildJumpGrid(); });
 $('#jumpForm').onsubmit = async e => {
   e.preventDefault(); const q = $('#jumpQ').value.trim(); if (!q) return;
   const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
