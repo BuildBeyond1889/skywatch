@@ -131,8 +131,22 @@
     const h2 = (h + R) * D2R, hz = Math.hypot(v[0], v[1]) || 1e-9, c = Math.cos(h2) * n / hz;
     return [v[0] * c, v[1] * c, Math.sin(h2) * n];
   }
+  // Long-term precession for deep time (more than 300 years away): the celestial pole circles the ecliptic pole
+  // (50.29″ a year in longitude) while the tilt changes (Laskar 1986, good for ±10,000 years).
+  function precessLong(raH, decD, date) {
+    const T = (jd(date) - 2451545) / 36525, U = T / 100, as = D2R / 3600, e0 = 84381.448 * as;
+    const eps = (84381.448 - 4680.93 * U - 1.55 * U ** 2 + 1999.25 * U ** 3 - 51.38 * U ** 4 - 249.67 * U ** 5 - 39.05 * U ** 6 + 7.12 * U ** 7 + 27.87 * U ** 8 + 5.79 * U ** 9 + 2.45 * U ** 10) * as;
+    const ra = raH * 15 * D2R, dec = decD * D2R;
+    const x = Math.cos(dec) * Math.cos(ra), y = Math.cos(dec) * Math.sin(ra), z = Math.sin(dec);
+    const ye = y * Math.cos(e0) + z * Math.sin(e0), ze = -y * Math.sin(e0) + z * Math.cos(e0);
+    const lam = Math.atan2(ye, x) + (5028.796195 * T + 1.1054348 * T * T) * as, bet = Math.asin(clamp(ze, -1, 1));
+    const xl = Math.cos(bet) * Math.cos(lam), yl = Math.cos(bet) * Math.sin(lam), zl = Math.sin(bet);
+    const y2 = yl * Math.cos(eps) - zl * Math.sin(eps), z2 = yl * Math.sin(eps) + zl * Math.cos(eps);
+    return { ra: Math.atan2(y2, xl), dec: Math.asin(clamp(z2, -1, 1)) };
+  }
   function precess(raH, decD, date) {
     const T = (jd(date) - 2451545) / 36525, as = D2R / 3600;
+    if (Math.abs(T) > 3) return precessLong(raH, decD, date);
     const zeta = (2306.2181 * T + 0.30188 * T * T) * as, z = (2306.2181 * T + 1.09468 * T * T) * as, th = (2004.3109 * T - 0.42665 * T * T) * as;
     const ra = raH * 15 * D2R, dec = decD * D2R;
     const A = Math.cos(dec) * Math.sin(ra + zeta);

@@ -31,11 +31,13 @@
       <div class="inline"><input type="datetime-local" id="tmInput" step="60" value="${local}" aria-label="Date and time" style="flex:1 1 200px"><button type="button" class="btn primary small" id="tmGo">Go</button></div>
       <div class="sec-label">Quick picks</div>
       <div class="list">${picks.map((pk, i) => `<div class="event go" role="button" tabindex="0" data-tm="${i}"><div class="grow"><div class="h"><b>${esc(pk[0])}</b></div><div class="m">${esc(new Date(pk[1]).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }).toUpperCase())}</div></div></div>`).join('')}</div>
+      <button type="button" class="jumpopen" id="dtOpen"><b>⏳ Deep time</b><small>Slide from 10,000 BC to 10,000 AD: drifting stars, changing pole stars, supernovae, Halley’s Comet and what was happening around the world</small><span aria-hidden="true">›</span></button>
       <div class="sec-label">Playback speed</div>
       <div class="seg" id="rateSeg">${[[0, 'Pause'], [1, '1×'], [10, '10×'], [100, '100×'], [1000, '1000×']].map(r => `<button type="button" data-r="${r[0]}" aria-pressed="${S.rate === r[0]}">${r[1]}</button>`).join('')}</div>
       <p class="muted" style="margin:0">At 100× a whole ISS orbit takes under a minute. At 1000× you watch the night sky turn.</p>
       <button type="button" class="btn" id="tmLive">Back to live</button>
       <p class="muted" style="margin:0;font-size:11.5px">Satellites only show within about 3 weeks of today, because orbit data can’t predict further. Stars, planets and the Moon are exact for any date.</p>`;
+    $('#dtOpen').onclick = () => openDeepTime();
     $('#tmGo').onclick = () => { const v = $('#tmInput').value; const t = new Date(v).getTime(); if (!isFinite(t)) return toast('Pick a date and time first.'); timeJump(t); };
     $$('#timeBody [data-tm]').forEach(el => el.onclick = () => { const pk = picks[+el.dataset.tm]; timeJump(pk[1], 'Showing ' + pk[0].split(' · ')[0] + '.'); });
     $$('#rateSeg button').forEach(b => b.onclick = () => { S.rate = +b.dataset.r; S.jump++; buildTime(); toast(S.rate === 0 ? 'Time paused.' : S.rate === 1 ? 'Normal speed.' : 'Playing at ' + S.rate + '×.'); });
@@ -450,7 +452,7 @@
     const row = (k, ok, v) => rows.push(`<div class="kv"><span>${ok === true ? '✓' : ok === false ? '✗' : '•'} ${esc(k)}</span><span>${esc(v)}</span></div>`);
     const render = () => { out.innerHTML = rows.join(''); };
     out.innerHTML = '<p class="muted">Checking…</p>';
-    row('App version', null, 'v30 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
+    row('App version', null, 'v31 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
     row('Orbit math library', S.libs.sat, S.libs.sat ? 'loaded' : 'missing');
     row('Planet library', S.libs.astro, S.libs.astro ? 'loaded' : 'missing');
     for (const gr of GROUPS) if (Sats.status[gr.id] != null) row('CelesTrak · ' + gr.name, typeof Sats.status[gr.id] === 'number', typeof Sats.status[gr.id] === 'number' ? fmt(Sats.status[gr.id]) + ' · ' + ((Date.now() - (Sats.age[gr.id] || Date.now())) / 3600e3).toFixed(1) + ' h old' : String(Sats.status[gr.id]));

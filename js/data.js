@@ -267,12 +267,19 @@
     return out;
   }
 
+  // Proper motion of bright stars, milliarcseconds a year (RA·cos Dec, Dec). Over thousands of years these visibly reshape constellations.
+  const STAR_PM = { Arcturus: [-1093.4, -1999.4], Sirius: [-546.0, -1223.1], Procyon: [-716.6, -1034.6], 'Rigil Kentaurus': [-3679.3, 473.7], Vega: [200.9, 286.2], Altair: [536.2, 385.3], Aldebaran: [63.5, -188.9], Pollux: [-626.6, -45.8], Capella: [75.5, -427.1], Rigel: [1.3, 0.5], Betelgeuse: [27.5, 11.3], Polaris: [44.5, -11.9], Spica: [-42.5, -31.7], Antares: [-12.1, -23.3], Fomalhaut: [329.2, -164.2], Deneb: [2.0, 1.6], Regulus: [-248.7, 5.6], Achernar: [88.0, -40.1], Canopus: [19.9, 23.2], Castor: [-191.5, -145.2], Thuban: [-56.5, 17.2], Kochab: [-32.3, 12.0], Dubhe: [-134.1, -34.7], Merak: [81.4, 33.5], Phecda: [107.8, 11.2], Megrez: [103.6, 7.8], Alioth: [111.7, -8.2], Mizar: [121.2, -22.0], Alkaid: [-121.2, -15.0], Bellatrix: [-8.1, -13.0], Denebola: [-497.7, -114.7], Mirfak: [24.1, -26.0], Hadar: [-33.3, -23.2], Acrux: [-35.8, -14.7], Mimosa: [-42.9, -16.2], Gacrux: [28.2, -265.1], Algol: [2.4, -1.4] };
   // ---------- sky bodies ----------
   function updateStars(now) {
     if (!S.obs) return;
     const lst = gmst(now) + S.obs.lon * D2R;
     if (!S.precessedFor || Math.abs(now - S.precessedFor) > 864e5 * 30) {
-      for (const s of STARS.concat(DSOS)) { const p = precess(s.raH, s.decD, now); s.ra = p.ra; s.dec = p.dec; }
+      const yrs = (now.getTime() - 946728000000) / 31557600000;
+      for (const s of STARS.concat(DSOS)) {
+        let rh = s.raH, dd = s.decD; const pm = STAR_PM[s.name];
+        if (pm && s.kind === 'star') { dd += pm[1] * yrs / 3.6e6; rh += pm[0] * yrs / 3.6e6 / Math.max(Math.cos(s.decD * D2R), 0.05) / 15; }
+        const p = precess(rh, dd, now); s.ra = p.ra; s.dec = p.dec;
+      }
       for (const pb of PROBES) { const p = precess(pb.ra, pb.dec, now); pb.raP = p.ra; pb.decP = p.dec; }
       S.precessedFor = now.getTime();
     }

@@ -146,6 +146,7 @@
       g.stroke();
     }
     if (typeof drawLaunches === 'function') drawLaunches(now, placed, t);
+    if (typeof drawDeepTime === 'function') drawDeepTime(now, placed, t);
     drawArrows(t, placed);
     if (S.align) drawAlignTargets();
     if (S.f.showDetect && ST.pts && performance.now() - ST.ptsAt < 1600 && S.mode === 'ar') {
@@ -381,7 +382,7 @@
     g.setLineDash([]);
   }
   function drawReticle(p, t, col) {
-    const ph = (t % 2400) / 2400;
+    const ph = (((t % 2400) + 2400) % 2400) / 2400;
     g.strokeStyle = C(col, 0.7 * (1 - ph)); g.lineWidth = 1;
     g.beginPath(); g.arc(p.x, p.y, 12 + ph * 24, 0, 6.283); g.stroke();
     const s = 15 + Math.sin(t / 290) * 1.5, L = 7;

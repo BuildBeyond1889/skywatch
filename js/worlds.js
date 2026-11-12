@@ -270,7 +270,7 @@ WORLDS.ground = (() => {
         const r = clamp(2 + (q.mag - 2.5) * 3.2, 3, 22);
         g.strokeStyle = C(col, 0.9); g.lineWidth = 1.5; g.beginPath(); g.arc(p.x, p.y, r, 0, 6.283); g.stroke();
         g.fillStyle = C(col, 0.25); g.fill();
-        if (ageH < 6) { const ph = (t % 2000) / 2000; g.strokeStyle = C(col, 0.7 * (1 - ph)); g.beginPath(); g.arc(p.x, p.y, r + ph * 22, 0, 6.283); g.stroke(); }
+        if (ageH < 6) { const ph = (((t % 2000) + 2000) % 2000) / 2000; g.strokeStyle = C(col, 0.7 * (1 - ph)); g.beginPath(); g.arc(p.x, p.y, r + ph * 22, 0, 6.283); g.stroke(); }
         hits.push({ x: p.x, y: p.y, r: Math.max(18, r + 4), o: q, pr: 4 });
         if (q.mag >= 4.5 || q === S.sel) label(placed, p.x, p.y, r + 2, 'M' + q.mag.toFixed(1) + ' · ' + (ageH < 1 ? Math.round(ageH * 60) + ' min ago' : ageH < 48 ? Math.round(ageH) + ' h ago' : Math.round(ageH / 24) + ' d ago'), Math.round(dv(q.depth)) + ' ' + DU() + ' DEEP · ' + kmTxt(Math.hypot(...q.v)) + ' AWAY', C('#ffffff'), C(col), 4, q === S.sel);
         if (q === S.sel) drawReticle(p, t, col);
@@ -608,7 +608,7 @@ WORLDS.infra = (() => {
         const col = cube ? '#ffc21a' : tw.type === 'Cell / radio mast' ? '#5ad1ff' : '#ff9ad0', d = Math.hypot(...tw.v), hidden = altOf(tw.v) < -0.05 && d > 25;
         if (hidden) g.globalAlpha = 0.55;
         g.strokeStyle = C(col); g.lineWidth = 1.5; g.beginPath(); g.moveTo(p.x, p.y + 9); g.lineTo(p.x, p.y - 4); g.moveTo(p.x - 5, p.y + 9); g.lineTo(p.x, p.y - 4); g.lineTo(p.x + 5, p.y + 9); g.stroke();
-        const ph = ((t + tw.lat * 1e5) % 1800) / 1800; g.strokeStyle = C(col, 0.6 * (1 - ph)); g.beginPath(); g.arc(p.x, p.y - 4, 4 + ph * 14, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
+        const ph = ((((t + tw.lat * 1e5) % 1800) + 1800) % 1800) / 1800; g.strokeStyle = C(col, 0.6 * (1 - ph)); g.beginPath(); g.arc(p.x, p.y - 4, 4 + ph * 14, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
         hits.push({ x: p.x, y: p.y, r: 20, o: tw, pr: 4 });
         g.globalAlpha = 1;
         if (cube) { const n = st.stations.filter(sn => sn.rb && sn.rb.name && towerOf(sn) === tw); if (!tw.cubeTxt || tw.cubeN !== n.length) { tw.cubeN = n.length; tw.cubeTxt = n.map(sn => sn.freq + ' ' + sn.call.split('-')[0]).slice(0, 3).join(' · ') + (n.length > 3 ? ' +' + (n.length - 3) : ''); } label(placed, p.x, p.y, 8, tw.cubeTxt, 'ON LU CUBE · ' + kmTxt(d) + (hidden ? ' · BEYOND HORIZON' : ''), C('#ffffff'), C('#ffc21a'), tw === S.sel ? 9 : 6, tw === S.sel); }

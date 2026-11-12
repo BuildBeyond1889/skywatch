@@ -31,6 +31,7 @@
       nl.hidden = false;
       const m = Math.round(S.offset / 60000), sameDay = now.toDateString() === new Date().toDateString();
       const when = sameDay ? tfmt(now).toUpperCase() + ' (' + (Math.abs(m) >= 60 ? (Math.abs(m) / 60).toFixed(1).replace('.0', '') + ' H' : Math.abs(m) + ' MIN') + (m < 0 ? ' AGO' : ' AHEAD') + ')'
+        : now.getUTCFullYear() < 1000 || now.getUTCFullYear() > 9999 ? (now.toLocaleString([], { month: 'short', day: 'numeric' }) + ', ' + (now.getUTCFullYear() <= 0 ? fmt(1 - now.getUTCFullYear()) + ' BC' : (now.getUTCFullYear() < 1000 ? 'AD ' : '') + fmt(now.getUTCFullYear()) + (now.getUTCFullYear() > 9999 ? ' AD' : ''))).toUpperCase()
         : now.toLocaleString([], { year: Math.abs(S.offset) > 300 * 864e5 ? 'numeric' : undefined, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).toUpperCase();
       $('#notLiveText').textContent = (S.rate === 0 ? 'PAUSED · ' : S.rate !== 1 ? S.rate + '× · ' : 'NOT LIVE · ') + when + (Math.abs(S.offset) > SAT_RANGE ? ' · NO SATELLITES' : '');
     }
@@ -127,6 +128,7 @@
     const t = now.getTime();
     let html = '';
     if (o.kind === 'launch') html = launchCard(o, now);
+    else if (o.kind === 'deepobj') html = deepCard(o);
     else if (o.kind === 'worldhome') html = WORLDS[S.world].home(now);
     else if (o.world && WORLDS[o.world]) html = WORLDS[o.world].card(o, now);
     else if (o.kind === 'sat') {
@@ -270,6 +272,7 @@
   // Collapsed card: one line, or a sideways strip for the spacecraft list.
   function compactFor(o, now) {
     if (o.kind === 'launch') return launchCompact(o, now);
+    if (o.kind === 'deepobj') return deepCompact(o);
     if (o.kind === 'worldhome') return WORLDS[S.world].homeCompact ? WORLDS[S.world].homeCompact(now) : '';
     if (o.world && WORLDS[o.world]) return WORLDS[o.world].compact(o, now);
     if (o.kind === 'stationhome') {

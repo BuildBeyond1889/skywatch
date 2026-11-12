@@ -359,6 +359,7 @@ function buildJumpGrid() {
     jumpTo(p[2], p[3], p[0], p[1]);
   });
 }
+$('#dtOpen2').onclick = () => openDeepTime();
 $('#jumpOpen').onclick = () => { openSheet('sheetJump'); try { buildJumpGrid(); } catch (e) { toast('Places list error: ' + e.message, 6000); } };
 buildJumpGrid();
 $('#jumpQ').addEventListener('input', () => { JUMP.q = $('#jumpQ').value.trim(); $('#jumpRes').innerHTML = ''; buildJumpGrid(); });
