@@ -19,5 +19,8 @@ The camera and motion sensors only work over https, so the app needs a real web 
 - Tap anything for details. Drag to look past the camera view; it snaps back when you let go. Pinch to zoom.
 - Time slider: ±2 hours. Tap LIVE to return to now.
 - The sun icon (top right) opens **Tonight**: passes, Starlink trains, launches, reentries, meteors, aurora.
+- **Modes** (under the compass): Orbit, Deep space (galaxies, nebulae, clusters, Voyager, New Horizons, JWST) and Meteors (radiant, best place to look, auto-catch).
+- **Star lock**: in camera view at night, bright stars in the image are used to correct the compass automatically.
+- **Add to calendar** on any pass or meteor peak sets a phone reminder that works with the app closed.
 
 Data: CelesTrak (orbits), The Space Devs (launches), NOAA SWPC (aurora). Orbit data is cached on the phone for offline use.

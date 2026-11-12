@@ -87,7 +87,15 @@ body.red.ar #redwash { display: block; }
 #readout { display: flex; justify-content: space-between; gap: 6px; font-size: 9.5px; letter-spacing: 0.4px; color: var(--dim); padding: 0 2px; pointer-events: none; }
 #readout b { color: var(--fg); font-weight: 500; }
 
-#banner { position: fixed; left: 50%; top: calc(var(--st) + 128px); transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; font-size: 13px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+#modeSeg { align-self: center; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 12px; width: min(320px, 100%); }
+#modeSeg button { height: 32px; border: none; border-radius: 9px; background: transparent; color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+#modeSeg button[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); }
+body.v-deep #modeSeg button[aria-pressed="true"] { background: #ece6ff; color: #120c2a; }
+body.v-meteor #modeSeg button[aria-pressed="true"] { background: #ffe2b8; color: #24160a; }
+body.red #modeSeg button[aria-pressed="true"] { background: var(--chip); color: var(--chip-fg); }
+.catch { display: inline-flex; align-items: center; gap: 8px; }
+.catch .dot { background: #ff6b5e; }
+#banner { position: fixed; left: 50%; top: calc(var(--st) + 172px); transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; font-size: 13px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
 #banner .row { gap: 8px; }
 .btn { height: 40px; border-radius: 10px; padding: 0 16px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); font-weight: 600; font-size: 13px; }
 .btn.primary { background: var(--accent); color: var(--chip-fg); border-color: transparent; }
@@ -104,6 +112,7 @@ body.red.ar #redwash { display: block; }
 #card { border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden; box-shadow: 0 18px 40px rgba(0,0,0,0.45); }
 #card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); }
 .card-head { display: flex; align-items: flex-start; gap: 10px; }
+#cardClose ~ .card-head { padding-right: 30px; }
 .card-title { font-family: var(--display); font-size: 17px; font-weight: 700; line-height: 1.15; }
 .card-sub { font-size: 9.5px; color: var(--dim); margin-top: 2px; }
 .tag { padding: 2px 8px; border-radius: 999px; font-size: 9.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; border: 1px solid currentColor; white-space: nowrap; }
@@ -153,7 +162,7 @@ body.red #shutter span { background: var(--fg); }
 #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity 0.5s ease; }
 #flash.on { opacity: 0.85; transition: none; }
 
-#toast { position: fixed; left: 50%; bottom: calc(var(--sb) + 230px); transform: translate(-50%, 12px); max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; font-size: 13px; opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease; pointer-events: none; text-align: center; }
+#toast { position: fixed; left: 50%; top: calc(var(--st) + 178px); transform: translate(-50%, -8px); max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 12px; font-size: 13px; opacity: 0; transition: opacity 0.25s ease, transform 0.25s ease; pointer-events: none; text-align: center; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
 
 /* Sheets */
@@ -236,7 +245,7 @@ a { color: var(--accent); }
 #start .status { font: 500 10.5px var(--mono); color: var(--dim); letter-spacing: 0.5px; min-height: 16px; }
 .linkish { background: none; border: none; color: var(--accent); padding: 6px 0; font-size: 13px; text-align: left; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-@media (min-width: 760px) { #lower { max-width: 720px; margin: 0 auto; } #toast { bottom: calc(var(--sb) + 250px); } }
+@media (min-width: 760px) { #lower { max-width: 720px; margin: 0 auto; } }
 </style>
 </head>
 <body>
@@ -254,7 +263,8 @@ a { color: var(--accent); }
     <button type="button" id="gearBtn" class="icon-btn glass" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
   </div>
   <div id="tapeWrap" class="glass"><canvas id="tape"></canvas></div>
-  <div id="readout" class="mono"><span>AZ <b id="roAz">–</b></span><span>ALT <b id="roAlt">–</b></span><span>FOV <b id="roFov">–</b></span><span><b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW</span></div>
+  <div id="readout" class="mono"><span>AZ <b id="roAz">–</b></span><span>ALT <b id="roAlt">–</b></span><span>FOV <b id="roFov">–</b></span><span id="roCount"><b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW</span></div>
+  <div id="modeSeg" class="glass" role="group" aria-label="Mode"><button type="button" data-v="orbit">Orbit</button><button type="button" data-v="deep">Deep space</button><button type="button" data-v="meteor">Meteors</button></div>
 </div>
 
 <div id="banner" class="glass" hidden><span id="bannerText"></span><div class="row" id="bannerBtns"></div></div>
@@ -324,6 +334,7 @@ a { color: var(--accent); }
 </div>
 
 <script src="stars.js"></script>
+<script src="deep.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

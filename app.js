@@ -153,6 +153,15 @@
   ].map(p => ({ kind: 'planet', ...p, v: null, mag: 9, dist: 0 }));
   const MOON = { kind: 'moon', name: 'Moon', v: null, frac: 0.5, phase: 0, distKm: 384400, mag: -10 };
   const SUN = { kind: 'sun', name: 'Sun', v: null, mag: -26.7 };
+  const DSO_COL = { galaxy: '#c9b8ff', nebula: '#ff9ad0', cluster: '#a9c8ff', globular: '#ffe2b8', planetary: '#7cf2d8', remnant: '#8fd0ff', blackhole: '#ffb45a' };
+  const DSO_TYPE = { galaxy: 'Galaxy', nebula: 'Nebula', cluster: 'Star cluster', globular: 'Globular cluster', planetary: 'Planetary nebula', remnant: 'Supernova remnant', blackhole: 'Black hole' };
+  const DSOS = (window.SKY_DSO || []).map(d => ({ kind: 'dso', id: d[0], name: d[1], type: d[2], raH: d[3], decD: d[4], mag: d[5], size: d[6], ly: d[7], fact: d[8], v: null }));
+  const PROBES = (window.SKY_PROBES || []).map(p => ({ kind: 'probe', ...p, v: null }));
+  const JWST = { kind: 'probe', name: 'James Webb Space Telescope', short: 'JWST', jwst: true, v: null, launched: 2021, kms: 0.2, fact: 'Orbits the Sun–Earth L2 point 1.5 million km away, on the side of Earth facing away from the Sun. Its position here is approximate.' };
+  const dsoLabel = d => (/^M\d+$/.test(d.id) && d.name !== d.id ? d.id + ' ' : '') + d.name;
+  function seeWith(d) { if (d.type === 'blackhole') return 'RADIO ONLY'; if (d.mag <= 4.5) return 'NAKED EYE'; if (d.mag <= 7.5) return 'BINOCULARS'; return 'TELESCOPE'; }
+  function probeAU(p, date) { return p.au2025 + p.auPerYr * ((date.getTime() - Date.UTC(2025, 0, 1)) / (365.25 * 864e5)); }
+  function lyText(ly) { return ly >= 1e6 ? (ly / 1e6).toFixed(ly >= 1e7 ? 0 : 1) + ' million ly' : fmt(ly) + ' ly'; }
 
   // Satellite groups (CelesTrak GP groups). std = standard magnitude at 1,000 km range, half lit.
   const GROUPS = [
@@ -186,10 +195,12 @@
     preset: 'all', align: false,
     f: Object.assign({ groups: Object.fromEntries(GROUPS.map(g => [g.id, g.on])), hMin: 0, hMax: 14, density: 'smart',
       layers: { stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true } }, ls.get('filters', {})),
-    alarms: [], events: [], planetsAt: 0, starsAt: 0, libs: { sat: false, astro: false }
+    alarms: [], events: [], planetsAt: 0, starsAt: 0, libs: { sat: false, astro: false },
+    view: 'orbit', deepPreset: 'all', feat: null, featObj: null, autoCatch: false, caught: 0, angVel: 0
   };
   S.f.groups = Object.assign(Object.fromEntries(GROUPS.map(g => [g.id, g.on])), S.f.groups || {});
   S.f.layers = Object.assign({ stars: true, lines: true, planets: true, meteors: true, grid: true, trails: true }, S.f.layers || {});
+  if (S.f.autoStar == null) S.f.autoStar = true;
   const saveFilters = () => ls.set('filters', S.f);
   const simNow = () => new Date(Date.now() + S.offset);
 
@@ -478,11 +489,15 @@
     if (!S.obs) return;
     const lst = gmst(now) + S.obs.lon * D2R;
     if (!S.precessedFor || Math.abs(now - S.precessedFor) > 864e5 * 30) {
-      for (const s of STARS) { const p = precess(s.raH, s.decD, now); s.ra = p.ra; s.dec = p.dec; }
+      for (const s of STARS.concat(DSOS)) { const p = precess(s.raH, s.decD, now); s.ra = p.ra; s.dec = p.dec; }
+      for (const pb of PROBES) { const p = precess(pb.ra, pb.dec, now); pb.raP = p.ra; pb.decP = p.dec; }
       S.precessedFor = now.getTime();
     }
     for (const s of STARS) s.v = refract(eqToEnu(s.ra, s.dec, lst, S.obs));
+    for (const d of DSOS) d.v = refract(eqToEnu(d.ra, d.dec, lst, S.obs));
+    for (const pb of PROBES) pb.v = refract(eqToEnu(pb.raP, pb.decP, lst, S.obs));
     const su = sunEci(now);
+    JWST.v = refract(eqToEnu(su.ra + Math.PI, -su.dec, lst, S.obs));
     SUN.v = refract(eqToEnu(su.ra, su.dec, lst, S.obs));
   }
   function updatePlanets(now) {
@@ -596,7 +611,9 @@
     if (S.mode === 'ar' && S.q) {
       const ang = qAngle(S.q, S.qT);
       const k = clamp(0.1 + ang * 0.07, 0.1, 0.85);
+      const q0 = S.q;
       S.q = slerp(S.q, S.qT, 1 - Math.pow(1 - k, dt * 60));
+      S.angVel = S.angVel * 0.85 + 0.15 * (qAngle(q0, S.q) / Math.max(dt, 1e-3));
       M = mmul(rz(-S.hcorr), q2m(S.q));
       M = mmul(M, mmul(ry(-S.dragYaw), rx(S.dragPitch)));
     } else {
@@ -666,6 +683,8 @@
       if (nowP - zoneAt > 400) { zoneAt = nowP; updateZones(); }
       updateSats(now, S.scrubbing ? 10 : 6);
       draw(now);
+      starTrack(nowP);
+      meteorWatch(nowP);
       if (nowP - cardAt > 250) { cardAt = nowP; updateHUD(now); updateCard(now); checkAlarms(); }
     } catch (e) {
       if (!S.errShown) { S.errShown = true; console.error(e); toast('Display error: ' + e.message, 5000); }
@@ -686,6 +705,7 @@
     const placed = [];
     const dens = { few: { star: 0.6, sat: 6 }, smart: { star: 1.6, sat: 16 }, all: { star: 2.7, sat: 50 } }[S.f.density] || { star: 1.6, sat: 16 };
     const starDim = ar ? 1 : clamp(1 - (sunAlt + 4) / 10, 0.25, 1);
+    if (S.view === 'deep') drawDeep(placed, t);
 
     // constellation lines
     if (S.f.layers.lines && S.f.layers.stars) {
@@ -741,9 +761,10 @@
         }
       }
     }
-    if (S.f.layers.meteors) drawRadiants(now, placed, sunAlt);
-    drawSats(t, placed, dens, sunAlt);
-    drawArrows(t);
+    if (S.view === 'meteor') drawMeteorMode(now, placed, sunAlt);
+    else if (S.f.layers.meteors && S.view === 'orbit') drawRadiants(now, placed, sunAlt);
+    if (S.view === 'orbit') drawSats(t, placed, dens, sunAlt);
+    drawArrows(t, placed);
     if (S.align) drawAlignTargets();
   }
   function drawSpaced(text, x, y, sp) {
@@ -980,11 +1001,137 @@
       }
     }
   }
-  function drawArrows(t) {
+  // ---------- deep space mode ----------
+  function deepShown(d) {
+    const pr = S.deepPreset, sw = seeWith(d);
+    return pr === 'all' || (pr === 'eye' && sw === 'NAKED EYE') || (pr === 'bino' && (sw === 'NAKED EYE' || sw === 'BINOCULARS')) ||
+      (pr === 'galaxy' && d.type === 'galaxy') || (pr === 'nebula' && /nebula|planetary|remnant/.test(d.type)) || (pr === 'cluster' && /cluster|globular/.test(d.type));
+  }
+  function probeSub(pb) {
+    if (pb.jwst) return 'L2 · 1.5M KM · APPROX.';
+    const au = probeAU(pb, simNow());
+    return (au * 0.1496).toFixed(1) + 'B KM · LIGHT ' + (au * 8.317 / 60).toFixed(1) + ' H';
+  }
+  function drawDeep(placed, t) {
+    let n = 0;
+    for (const d of DSOS) {
+      if (!d.v || altOf(d.v) < -0.5 || !deepShown(d)) continue;
+      const p = project(d.v); if (!onScreen(p, 80)) continue;
+      n++;
+      const col = DSO_COL[d.type] || '#ffffff';
+      const r = clamp(FOC * Math.tan(d.size / 120 * D2R), 6, 160), mr = clamp(r * 0.5, 9, 22);
+      if (d.type === 'blackhole') {
+        const gr = g.createRadialGradient(p.x, p.y, 3, p.x, p.y, 26); gr.addColorStop(0, C(col, 0.55)); gr.addColorStop(1, C(col, 0));
+        g.fillStyle = gr; g.beginPath(); g.arc(p.x, p.y, 26, 0, 6.283); g.fill();
+        g.strokeStyle = C(col); g.lineWidth = 2; g.beginPath(); g.ellipse(p.x, p.y, 15, 5, -0.35, 0, 6.283); g.stroke();
+        g.fillStyle = C('#000000'); g.beginPath(); g.arc(p.x, p.y, 5, 0, 6.283); g.fill();
+      } else {
+        const a = clamp(0.55 - Math.min(d.mag, 9) * 0.045, 0.12, 0.5) * (0.85 + 0.15 * Math.sin(t / 1600 + d.raH));
+        const gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        gr.addColorStop(0, C(col, a)); gr.addColorStop(0.4, C(col, a * 0.45)); gr.addColorStop(1, C(col, 0));
+        g.fillStyle = gr; g.save();
+        if (d.type === 'galaxy') { g.translate(p.x, p.y); g.rotate(-0.5); g.scale(1, 0.42); g.translate(-p.x, -p.y); }
+        g.beginPath(); g.arc(p.x, p.y, r, 0, 6.283); g.fill(); g.restore();
+        if (d.type === 'cluster' || d.type === 'globular') {
+          let sd = d.raH * 1000 | 0; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+          g.fillStyle = C('#ffffff', 0.75);
+          for (let k = 0; k < (d.type === 'globular' ? 26 : 14); k++) { const rr = r * 0.45 * Math.sqrt(rnd()), aa = rnd() * 6.283; g.fillRect(p.x + Math.cos(aa) * rr, p.y + Math.sin(aa) * rr, 1.3, 1.3); }
+        }
+        g.strokeStyle = C(col, 0.75); g.lineWidth = 1; g.setLineDash(d.type === 'nebula' ? [3, 3] : []);
+        g.beginPath(); g.arc(p.x, p.y, mr, 0, 6.283); g.stroke(); g.setLineDash([]);
+      }
+      if (d === S.sel) drawReticle(p, t, col);
+      hits.push({ x: p.x, y: p.y, r: clamp(r, 26, 60), o: d, pr: 4 });
+      label(placed, p.x, p.y, mr, dsoLabel(d), lyText(d.ly).toUpperCase() + ' · ' + seeWith(d), C('#ffffff'), C(col), 4, d === S.sel || d.mag < 4.5 || d.type === 'blackhole');
+    }
+    for (const pb of PROBES.concat([JWST])) {
+      if (!pb.v || altOf(pb.v) < -0.5) continue;
+      const p = project(pb.v); if (!onScreen(p, 10)) continue;
+      n++;
+      g.strokeStyle = C('#ffd37a'); g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(p.x, p.y - 8); g.lineTo(p.x + 8, p.y); g.lineTo(p.x, p.y + 8); g.lineTo(p.x - 8, p.y); g.closePath(); g.stroke();
+      g.fillStyle = C('#ffd37a'); g.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+      if (pb === S.sel) drawReticle(p, t, '#ffd37a');
+      hits.push({ x: p.x, y: p.y, r: 28, o: pb, pr: 6 });
+      label(placed, p.x, p.y, 10, pb.short || pb.name, probeSub(pb), C('#fff1d6'), C('#c9b58c'), 5, true);
+    }
+    S.deepCount = n;
+  }
+
+  // ---------- meteor mode ----------
+  function radiantVec(sh, now) { const p0 = precess(sh.ra, sh.dec, now); return refract(eqToEnu(p0.ra, p0.dec, gmst(now) + S.obs.lon * D2R, S.obs)); }
+  function featuredShower(now) {
+    const pool = activeShowers(now).concat(nextShowers(now, 12));
+    if (S.feat) { const f = pool.find(x => x.name === S.feat); if (f) return f; }
+    const act = activeShowers(now).sort((a, b) => b.zhr - a.zhr);
+    return act.find(x => x.zhr >= 10) || nextShowers(now, 1)[0] || act[0];
+  }
+  function bestViewVec(v) {
+    const d = v[2]; let perp = [-d * v[0], -d * v[1], 1 - d * v[2]];
+    const pn = Math.hypot(perp[0], perp[1], perp[2]); if (pn < 1e-6) perp = [0, 1, 0]; else perp = perp.map(x => x / pn);
+    const a = 45 * D2R;
+    return [v[0] * Math.cos(a) + perp[0] * Math.sin(a), v[1] * Math.cos(a) + perp[1] * Math.sin(a), v[2] * Math.cos(a) + perp[2] * Math.sin(a)];
+  }
+  function drawMeteorMode(now, placed, sunAlt) {
+    const t = now.getTime(), feat = featuredShower(now);
+    if (!feat) return;
+    for (const sh of nextShowers(now, 6)) {
+      if (sh.name === feat.name || sh.start - now > 45 * 864e5) continue;
+      const v = radiantVec(sh, now); if (altOf(v) < 0) continue;
+      const p = project(v); if (!onScreen(p, 10)) continue;
+      g.strokeStyle = C('#ffb45a', 0.5); g.lineWidth = 1; g.setLineDash([2, 4]); g.beginPath(); g.arc(p.x, p.y, 10, 0, 6.283); g.stroke(); g.setLineDash([]);
+      hits.push({ x: p.x, y: p.y, r: 24, o: { kind: 'shower', ...sh }, pr: 3 });
+      label(placed, p.x, p.y, 12, sh.name, 'PEAK ' + sh.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }).toUpperCase(), C('#ffe2b8', 0.8), C('#c9a072'), 2);
+    }
+    const v = radiantVec(feat, now), alt = altOf(v);
+    S.featObj = Object.assign({}, feat, { rv: v, alt });
+    // example meteor paths: show which way meteors travel, outward from the radiant
+    const e1n = [v[1], -v[0], 0], l1 = Math.hypot(e1n[0], e1n[1]) || 1, e1 = [e1n[0] / l1, e1n[1] / l1, 0];
+    const e2 = [v[1] * e1[2] - v[2] * e1[1], v[2] * e1[0] - v[0] * e1[2], v[0] * e1[1] - v[1] * e1[0]];
+    const along = (beta, th) => { const cb = Math.cos(beta), sb = Math.sin(beta), c = Math.cos(th), s = Math.sin(th); return [v[0] * c + (e1[0] * cb + e2[0] * sb) * s, v[1] * c + (e1[1] * cb + e2[1] * sb) * s, v[2] * c + (e1[2] * cb + e2[2] * sb) * s]; };
+    const realT = Date.now();
+    for (let k = 0; k < 7; k++) {
+      const per = 2600 + k * 730, cyc = Math.floor((realT + k * 977) / per), ph = ((realT + k * 977) % per) / per;
+      if (ph > 0.28) continue;
+      let sd = (cyc * 7919 + k * 104729) % 2147483647; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+      const beta = rnd() * 6.283, th0 = (12 + rnd() * 25) * D2R, len = (10 + rnd() * 14) * D2R, pr = ph / 0.28;
+      const head = along(beta, th0 + len * pr), tail = along(beta, th0 + len * Math.max(0, pr - 0.45));
+      if (head[2] < 0.02 || tail[2] < 0.02) continue;
+      const ph1 = project(head), pt = project(tail); if (!ph1.ok || !pt.ok) continue;
+      const a = Math.sin(pr * Math.PI);
+      const gr = g.createLinearGradient(pt.x, pt.y, ph1.x, ph1.y); gr.addColorStop(0, C('#ffd9a8', 0)); gr.addColorStop(1, C('#ffffff', 0.9 * a));
+      g.strokeStyle = gr; g.lineWidth = 2; g.lineCap = 'round'; g.beginPath(); g.moveTo(pt.x, pt.y); g.lineTo(ph1.x, ph1.y); g.stroke(); g.lineCap = 'butt';
+    }
+    if (alt > -2) {
+      const p = project(v);
+      if (onScreen(p, 30)) {
+        g.strokeStyle = C('#ffb45a'); g.lineWidth = 1.5; g.setLineDash([3, 3]);
+        g.save(); g.translate(p.x, p.y); g.rotate(t / 6000); g.beginPath(); g.arc(0, 0, 18, 0, 6.283); g.stroke(); g.restore(); g.setLineDash([]);
+        const ring = ((realT % 2800) / 2800);
+        g.strokeStyle = C('#ffb45a', 0.7 * (1 - ring)); g.lineWidth = 1; g.beginPath(); g.arc(p.x, p.y, 10 + ring * 30, 0, 6.283); g.stroke();
+        g.fillStyle = C('#ffd08a'); g.beginPath(); g.arc(p.x, p.y, 3.5, 0, 6.283); g.fill();
+        hits.push({ x: p.x, y: p.y, r: 28, o: { kind: 'shower', ...feat }, pr: 5 });
+        label(placed, p.x, p.y, 20, feat.name + ' radiant', 'METEORS FLY OUT FROM HERE', C('#ffffff'), C('#ffcf8a'), 6, true);
+      }
+      const bv = bestViewVec(v), pb = project(bv);
+      if (onScreen(pb, 60)) {
+        const rad = FOC * Math.tan(12 * D2R);
+        g.fillStyle = C('#ffb45a', 0.05); g.beginPath(); g.arc(pb.x, pb.y, rad, 0, 6.283); g.fill();
+        g.strokeStyle = C('#ffb45a', 0.55 + 0.25 * Math.sin(realT / 700)); g.lineWidth = 1.3; g.setLineDash([5, 6]);
+        g.beginPath(); g.arc(pb.x, pb.y, rad, 0, 6.283); g.stroke(); g.setLineDash([]);
+        label(placed, pb.x - 45, pb.y, 0, 'Best view', 'LONGEST TRAILS · ' + Math.round(altOf(bv)) + '° UP', C('#ffffff'), C('#ffcf8a'), 5, true);
+      }
+    }
+  }
+
+  function drawArrows(t, placed) {
     const targets = [];
     if (S.sel && S.sel.v) targets.push(S.sel);
-    for (const s of Sats.prio) if (s.ok && s !== S.sel) targets.push(s);
-    for (const id of S.pinned) { const s = Sats.byId.get(id); if (s && s.ok && s !== S.sel && !SPECIAL[id]) targets.push(s); }
+    if (S.view === 'orbit') {
+      for (const s of Sats.prio) if (s.ok && s !== S.sel) targets.push(s);
+      for (const id of S.pinned) { const s = Sats.byId.get(id); if (s && s.ok && s !== S.sel && !SPECIAL[id]) targets.push(s); }
+    } else if (S.view === 'meteor' && S.featObj && S.featObj.rv) targets.push({ kind: 'radiant', name: S.featObj.name + ' radiant', v: S.featObj.rv, o: S.featObj });
+    else if (S.view === 'deep') { for (const pb of PROBES.concat([JWST])) if (pb !== S.sel) targets.push(pb); const m31 = DSOS.find(d => d.id === 'M31'); if (m31 && m31 !== S.sel) targets.push(m31); }
     let used = 0;
     for (const o of targets) {
       const v = o.kind === 'sat' ? satDir(o, t) : o.v;
@@ -1001,16 +1148,20 @@
       g.save(); g.translate(x + Math.cos(ang) * nudge, y + Math.sin(ang) * nudge); g.rotate(ang);
       g.fillStyle = C('#5ad1ff'); g.beginPath(); g.moveTo(9, 0); g.lineTo(-5, -7); g.lineTo(-2, 0); g.lineTo(-5, 7); g.closePath(); g.fill();
       g.restore();
-      const nm = o.kind === 'sat' ? (SPECIAL[o.id] || prettyName(o.name)) : o.name;
+      const nm = o.kind === 'sat' ? (SPECIAL[o.id] || prettyName(o.name)) : (o.short || o.name);
       const az = azOf(v);
       g.font = '700 10px Inter, sans-serif'; const tw = Math.max(g.measureText(nm.toUpperCase()).width, 60);
       let lx = x - Math.cos(ang) * 22 - tw / 2, ly = y - Math.sin(ang) * 22 - 12;
       lx = clamp(lx, 6, W - tw - 6); ly = clamp(ly, ZONE.top + 4, Math.max(ZONE.top + 4, ZONE.bot - 34));
+      const box = { x: lx - 6, y: ly - 4, w: tw + 12, h: 30 };
+      const clash = (placed || []).some(q => box.x < q.x + q.w && box.x + box.w > q.x && box.y < q.y + q.h && box.y + box.h > q.y);
+      if (clash) { hits.push({ x, y, r: 30, o: o.kind === 'radiant' ? { kind: 'shower', ...o.o } : o, pr: 9 }); if (++used >= 4) break; continue; }
+      if (placed) placed.push(box);
       g.fillStyle = C('#050a1a', 0.7); roundRect(lx - 6, ly - 4, tw + 12, 30, 6); g.fill();
       g.fillStyle = C('#e6f6ff'); g.textBaseline = 'top'; g.fillText(nm.toUpperCase(), lx, ly);
       g.font = MONO; g.fillStyle = C('#93a9cc'); g.fillText(cardinal(az) + ' · ' + Math.round(altOf(v)) + '° UP', lx, ly + 13);
       g.textBaseline = 'alphabetic';
-      hits.push({ x, y, r: 30, o, pr: 9 });
+      hits.push({ x, y, r: 30, o: o.kind === 'radiant' ? { kind: 'shower', ...o.o } : o, pr: 9 });
       if (++used >= 4) break;
     }
   }
@@ -1039,12 +1190,16 @@
     $('#roAz').textContent = az.toFixed(1) + '°';
     $('#roAlt').textContent = alt.toFixed(1) + '°';
     $('#roFov').textContent = Math.round(vfovDeg()) + '°';
-    if (S.counts) { $('#roUp').textContent = fmt(S.counts.up); $('#roView').textContent = fmt(S.counts.inView); }
+    const rc = $('#roCount');
+    if (S.view === 'orbit') { if (!$('#roUp')) rc.innerHTML = '<b id="roUp">0</b> UP · <b id="roView">0</b> IN VIEW'; if (S.counts) { $('#roUp').textContent = fmt(S.counts.up); $('#roView').textContent = fmt(S.counts.inView); } }
+    else if (S.view === 'deep') rc.innerHTML = '<b>' + (S.deepCount || 0) + '</b> DEEP-SKY IN VIEW';
+    else rc.innerHTML = S.featObj ? 'RADIANT <b>' + Math.round(S.featObj.alt) + '°</b> UP' : '';
     drawTape(az);
     const dot = $('#lockDot'), txt = $('#lockText'), acc = $('#lockAcc');
     dot.className = 'dot';
     if (S.mode !== 'ar') { txt.textContent = 'Sky view'; acc.textContent = ''; dot.classList.add('warn'); }
     else if (!S.absolute) { txt.textContent = 'No compass'; acc.textContent = 'ALIGN'; dot.classList.add('bad', 'pulse'); }
+    else if (ST.last && Date.now() - ST.last < 20000) { txt.textContent = 'Star lock'; acc.textContent = '±' + Math.max(0.1, ST.rms).toFixed(1) + '°'; dot.classList.add('pulse'); }
     else if (S.alignedAt && Date.now() - S.alignedAt < 6 * 3600e3) { txt.textContent = 'Aligned'; acc.textContent = '±0.5°'; dot.classList.add('pulse'); }
     else { txt.textContent = 'Compass'; acc.textContent = S.compassAcc != null ? '±' + Math.round(S.compassAcc) + '°' : '±10°'; dot.classList.add('warn'); }
     const lb = $('#liveBtn');
@@ -1077,8 +1232,8 @@
     S.sel = o; cardFor = null;
     rebuildActive();
     if (o && o.kind === 'sat') { computeSat(o, epochCtx(simNow())); o.next = null; nextPassFor(o); }
-    $('#card').hidden = !o;
-    if (o) updateCard(simNow(), true);
+    $('#card').hidden = !o && S.view === 'orbit';
+    updateCard(simNow(), true);
   }
   async function nextPassFor(s) {
     const res = await findPasses(s, simNow(), 48, { visibleOnly: true, max: 1 });
@@ -1086,8 +1241,11 @@
   }
   function stat(k, v, u) { return `<div><span>${k}</span><span class="mono">${v}${u ? `<small> ${u}</small>` : ''}</span></div>`; }
   function updateCard(now, force) {
-    const o = S.sel, card = $('#card');
-    if (!o) return;
+    let o = S.sel; const card = $('#card');
+    if (!o) {
+      if (S.view === 'orbit') return;
+      o = { kind: S.view === 'meteor' ? 'meteorhome' : 'deephome' };
+    }
     const t = now.getTime();
     let html = '';
     if (o.kind === 'sat') {
@@ -1106,7 +1264,7 @@
         <div class="stats">${stat('ALT', fmt(o.h), 'km')}${stat('VEL', o.spd.toFixed(2), 'km/s')}${stat('RANGE', fmt(o.range), 'km')}${stat('MAG', o.lit && alt > 0 ? o.mag.toFixed(1) : '—')}</div>
         <div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}° · ${alt.toFixed(1)}° UP</span><span>ORBIT ${fmt(o.perigee)}×${fmt(o.apogee)} KM · ${o.period.toFixed(0)} MIN</span><span>DATA ${ageD.toFixed(1)} D OLD</span></div>
         <div class="card-foot"><span>${next}</span></div>
-        <div class="card-actions">${o.next && o.next !== 'none' ? '<button type="button" class="btn small" id="remindBtn">Remind me</button>' : ''}<button type="button" class="btn small" id="jumpBtn">${o.next && o.next !== 'none' ? 'Preview pass' : 'Centre it'}</button></div>`;
+        <div class="card-actions">${o.next && o.next !== 'none' ? '<button type="button" class="btn small" id="calBtn">Add to calendar</button><button type="button" class="btn small" id="remindBtn">Remind me</button>' : ''}<button type="button" class="btn small" id="jumpBtn">${o.next && o.next !== 'none' ? 'Preview pass' : 'Centre it'}</button></div>`;
     } else if (o.kind === 'star') {
       const alt = altOf(o.v), az = azOf(o.v), yr = new Date().getFullYear();
       html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
@@ -1126,18 +1284,169 @@
       html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
         <div class="card-head"><div style="flex:1"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">METEOR SHOWER · FROM ${esc(o.parent.toUpperCase())}</div></div></div>
         <div class="stats">${stat('PEAK', o.peak.toLocaleDateString([], { month: 'short', day: 'numeric' }))}${stat('RATE', '~' + o.zhr, '/hr')}${stat('SPEED', o.v, 'km/s')}${stat('ENDS', o.end.toLocaleDateString([], { month: 'short', day: 'numeric' }))}</div>
-        <div class="card-foot"><span>Look about 45° away from the radiant, toward the darkest part of the sky. Rates are for a very dark sky; city skies show far fewer.</span></div>`;
+        <div class="card-foot"><span>Look about 45° away from the radiant, toward the darkest part of the sky. Rates are for a very dark sky; city skies show far fewer.</span></div>
+        <div class="card-actions"><button type="button" class="btn small" id="showerCal">Add peak to calendar</button>${S.view !== 'meteor' ? '<button type="button" class="btn small" id="toMeteor">Open meteor mode</button>' : ''}</div>`;
+    } else if (o.kind === 'meteorhome') {
+      const f = S.featObj; if (!f) return;
+      const days = Math.round((f.peak - now) / 864e5), active = now >= f.start && now <= f.end;
+      const moonUp = MOON.v && altOf(MOON.v) > 0, sunA = SUN.v ? altOf(SUN.v) : -30;
+      const rate = Math.round(f.zhr * Math.max(0, Math.sin(f.alt * D2R)) * 0.45 * (moonUp ? 1 - 0.6 * MOON.frac : 1));
+      const lst = gmst(now) + S.obs.lon * D2R, p0 = precess(f.ra, f.dec, now);
+      const transit = new Date(now.getTime() + wrap360((p0.ra - lst) * R2D) / 15 / 1.0027379 * 3600e3);
+      const tag = active ? (Math.abs(days) <= 1 ? 'Peak now' : days > 0 ? 'Active · peak in ' + days + ' d' : 'Active') : 'Peak in ' + days + ' d';
+      const nowLine = !active ? 'Not active yet. It starts ' + f.start.toLocaleDateString([], { month: 'short', day: 'numeric' }) + '.' : f.alt < 0 ? 'The radiant is below the horizon now. It is highest around ' + tfmt(transit) + '.' : sunA > -6 ? 'Wait for full darkness. The radiant is highest around ' + tfmt(transit) + '.' : 'About ' + rate + ' an hour from a suburban sky right now' + (moonUp && MOON.frac > 0.5 ? ' (the bright Moon hides faint ones).' : '.');
+      const catchBtn = S.mode === 'ar' ? `<button type="button" class="btn small" id="catchBtn" aria-pressed="${S.autoCatch}">${S.autoCatch ? '<span class="catch"><span class="dot pulse"></span>Auto-catch on · ' + S.caught + ' caught</span>' : 'Auto-catch meteors'}</button>` : '';
+      html = `<div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(f.name)}</div><div class="card-sub mono">FROM ${esc(f.parent.toUpperCase())}</div></div><span class="tag" style="color:#ffcf8a">${tag}</span></div>
+        <div class="stats">${stat('RATE', '~' + f.zhr, '/hr')}${stat('SPEED', f.v, 'km/s')}${stat('BEST', tfmt(transit).replace(' ', ''))}${stat('MOON', moonUp ? Math.round(MOON.frac * 100) + '%' : 'DOWN')}</div>
+        <div class="card-foot"><span>${nowLine}</span></div>
+        <div class="card-actions"><button type="button" class="btn small" id="showerCal">Add peak to calendar</button>${catchBtn}</div>
+        ${S.autoCatch ? '<div class="card-foot"><span>Rest the phone on something still, pointed at the "Best view" ring. Anything that streaks across gets saved to Snapshots.</span></div>' : ''}`;
+    } else if (o.kind === 'deephome') {
+      const au = p => probeAU(p, now);
+      const rows = PROBES.map(p => { const a = p.v ? altOf(p.v) : -90; return `<button type="button" class="srch-row" data-probe="${esc(p.name)}"><span>${esc(p.name)}</span><span>${(au(p) * 0.1496).toFixed(1)}B KM · ${a > 0 ? cardinal(azOf(p.v)) + ' ' + Math.round(a) + '° UP' : 'BELOW HORIZON'}</span></button>`; }).join('');
+      html = `<div class="card-head"><div style="flex:1"><div class="card-title">Deep space</div><div class="card-sub mono">SATELLITES HIDDEN · ${DSOS.length} SHOWPIECES · 4 SPACECRAFT</div></div></div>
+        <div class="srch">${rows}<button type="button" class="srch-row" data-probe="JWST"><span>James Webb Space Telescope</span><span>1.5M KM · ${JWST.v && altOf(JWST.v) > 0 ? cardinal(azOf(JWST.v)) + ' ' + Math.round(altOf(JWST.v)) + '° UP' : 'BELOW HORIZON'}</span></button></div>`;
+    } else if (o.kind === 'dso') {
+      const alt = altOf(o.v), az = azOf(o.v), yr = new Date().getFullYear();
+      const left = o.ly >= 1e6 ? (o.ly / 1e6).toFixed(1) + ' million years ago' : o.ly > yr ? fmt(Math.round(o.ly - yr)) + ' BC' : 'in ' + (yr - Math.round(o.ly)) + ' AD';
+      html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
+        <div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(dsoLabel(o))}</div><div class="card-sub mono">${esc(DSO_TYPE[o.type].toUpperCase())} · ${esc(o.id)}</div></div><span class="tag" style="color:${DSO_COL[o.type]}">${seeWith(o)}</span></div>
+        <div class="stats">${stat('DIST', o.ly >= 1e6 ? (o.ly / 1e6).toFixed(1) + 'M' : fmt(o.ly), 'ly')}${stat('MAG', o.mag > 50 ? '—' : o.mag.toFixed(1))}${stat('SIZE', o.size ? (o.size >= 60 ? (o.size / 60).toFixed(1) + '°' : o.size + "'") : '—')}${stat('ALT', alt.toFixed(1), '°')}</div>
+        <div class="card-foot"><span>${esc(o.fact)}</span></div>
+        <div class="card-foot mono"><span>${cardinal(az)} ${az.toFixed(0)}°</span><span>THE LIGHT YOU SEE LEFT ${esc(left.toUpperCase())}</span></div>`;
+    } else if (o.kind === 'probe') {
+      const alt = o.v ? altOf(o.v) : 0, az = o.v ? azOf(o.v) : 0;
+      const au = o.jwst ? 0.01 : probeAU(o, now), km = au * 1.496e8;
+      const st = o.jwst ? stat('DIST', '1.5', 'M km') + stat('SIGNAL', '5', 's') + stat('LAUNCHED', '2021') + stat('ALT', alt.toFixed(1), '°')
+        : stat('DIST', (km / 1e9).toFixed(2), 'B km') + stat('SIGNAL', (au * 8.317 / 60).toFixed(1), 'h') + stat('SPEED', o.kms, 'km/s') + stat('ALT', alt.toFixed(1), '°');
+      html = `<button type="button" id="cardClose" aria-label="Close details">×</button>
+        <div class="card-head"><div style="flex:1;min-width:0"><div class="card-title">${esc(o.name)}</div><div class="card-sub mono">SPACECRAFT · LAUNCHED ${o.launched}${o.jwst ? '' : ' · ' + au.toFixed(1) + ' AU FROM THE SUN'}</div></div></div>
+        <div class="stats">${st}</div>
+        <div class="card-foot"><span>${esc(o.fact)}</span></div>
+        <div class="card-foot mono"><span>${alt > 0 ? cardinal(az) + ' ' + az.toFixed(0) + '° · ' + alt.toFixed(1) + '° UP' : 'BELOW YOUR HORIZON NOW'}</span><span>DIRECTION APPROXIMATE</span></div>`;
     }
     const key = html.length + ':' + html.slice(0, 200) + ':' + html.slice(-300);
     if (!force && key === cardFor) return;
     cardFor = key;
     card.innerHTML = html;
-    $('#cardClose', card).onclick = () => select(null);
+    const cc = $('#cardClose', card); if (cc) cc.onclick = () => select(null);
+    const cb = $('#calBtn', card); if (cb) cb.onclick = () => passToCalendar(o, o.next);
+    const sc = $('#showerCal', card); if (sc) sc.onclick = () => { const f = o.kind === 'meteorhome' ? S.featObj : o; showerToCalendar(f); };
+    const tm = $('#toMeteor', card); if (tm) tm.onclick = () => { S.feat = o.name; setView('meteor'); };
+    const ca = $('#catchBtn', card); if (ca) ca.onclick = () => { S.autoCatch = !S.autoCatch; cardFor = null; toast(S.autoCatch ? 'Auto-catch on. Keep the phone still and the screen on.' : 'Auto-catch off.'); updateCard(simNow(), true); };
+    $$('[data-probe]', card).forEach(b => b.onclick = () => { const pb = b.dataset.probe === 'JWST' ? JWST : PROBES.find(x => x.name === b.dataset.probe); select(pb); if (S.mode === 'sky' && pb.v) { S.viewAz = azOf(pb.v); S.viewAlt = clamp(altOf(pb.v), -10, 85); } });
     const rb = $('#remindBtn', card); if (rb) rb.onclick = () => addAlarm(o, o.next);
     const jb = $('#jumpBtn', card); if (jb) jb.onclick = () => {
       if (o.next && o.next !== 'none') { setOffset(o.next.maxT - Date.now()); computeSat(o, epochCtx(simNow())); toast('Previewing the pass at its highest point. Tap LIVE to return.'); }
       if (S.mode === 'sky' && o.v) { const v = satDir(o, simNow().getTime()); S.viewAz = azOf(v); S.viewAlt = clamp(altOf(v), -10, 85); }
     };
+  }
+
+  // ---------- calendar reminders (work even when the app is closed) ----------
+  const icsDate = d => new Date(d).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const icsEsc = s => String(s).replace(/\\/g, '\\\\').replace(/[,;]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  function saveICS(file, title, start, end, desc, alarmMin) {
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Sky Watch//EN', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT',
+      'UID:' + start + '-' + Math.random().toString(36).slice(2) + '@skywatch', 'DTSTAMP:' + icsDate(Date.now()),
+      'DTSTART:' + icsDate(start), 'DTEND:' + icsDate(end), 'SUMMARY:' + icsEsc(title), 'DESCRIPTION:' + icsEsc(desc),
+      'BEGIN:VALARM', 'TRIGGER:-PT' + alarmMin + 'M', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(title), 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+    const a = document.createElement('a'); a.href = url; a.download = file + '.ics'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast('Calendar event created. Add it, and your phone will remind you even with Sky Watch closed.', 4500);
+  }
+  function passToCalendar(s, p) {
+    if (!p || p === 'none') return;
+    const nm = SPECIAL[s.id] || s.name;
+    saveICS(nm.replace(/\W+/g, '-').toLowerCase() + '-pass', nm + ' flyover (' + Math.round(p.maxEl) + '° high)', p.vStart, Math.max(p.vEnd, p.vStart + 60e3),
+      `Look ${cardinal(p.vStartAz)}. It rises in the ${cardinal(p.vStartAz)}, climbs to ${Math.round(p.maxEl)}° at ${tfmt(new Date(p.maxT))}, and sets in the ${cardinal(p.vEndAz)}. Brightness about magnitude ${p.mag.toFixed(1)}. Open Sky Watch to follow it.`, 3);
+  }
+  function showerToCalendar(f) {
+    if (!f) return;
+    const pk = new Date(f.peak); pk.setHours(22, 0, 0, 0);
+    saveICS(f.name.replace(/\W+/g, '-').toLowerCase() + '-peak', f.name + ' meteor shower peak', pk.getTime(), pk.getTime() + 7 * 3600e3,
+      `Up to ~${f.zhr} meteors an hour under a dark sky. Get away from lights, let your eyes adjust for 20 minutes, and look about 45° away from the radiant. Open Sky Watch's meteor mode to find it.`, 30);
+  }
+
+  // ---------- star lock: find bright stars in the camera image and correct the compass ----------
+  const ST = { cv: null, cx: null, at: 0, last: 0, n: 0, rms: 0 };
+  function grabFrame(o, aw) {
+    const vw = cam.videoWidth, vh = cam.videoHeight; if (!vw) return null;
+    const ah = Math.max(1, Math.round(aw * vh / vw));
+    if (!o.cv) { o.cv = document.createElement('canvas'); o.cx = o.cv.getContext('2d', { willReadFrequently: true }); }
+    if (o.cv.width !== aw || o.cv.height !== ah) { o.cv.width = aw; o.cv.height = ah; }
+    o.cx.drawImage(cam, 0, 0, aw, ah);
+    const d = o.cx.getImageData(0, 0, aw, ah).data, L = new Float32Array(aw * ah);
+    for (let i = 0, j = 0; i < L.length; i++, j += 4) L[i] = 0.3 * d[j] + 0.59 * d[j + 1] + 0.11 * d[j + 2];
+    return { L, aw, ah };
+  }
+  function vidToScreen(u, v, aw) {
+    const vw = cam.videoWidth, vh = cam.videoHeight, sc = Math.max(W / vw, H / vh) * S.zoom, k = vw / aw;
+    return [(W - vw * sc) / 2 + u * k * sc, (H - vh * sc) / 2 + v * k * sc];
+  }
+  const unproject = (x, y) => mv(VM, [(x - W / 2) / FOC, -(y - H / 2) / FOC, -1]);
+  function starTrack(nowP) {
+    if (S.mode !== 'ar' || !S.f.autoStar || !cam.videoWidth || !S.q || nowP - ST.at < 1500) return;
+    ST.at = nowP;
+    if (S.angVel > 4 || S.dragging || Math.hypot(S.dragYaw, S.dragPitch) > 0.5 || S.align) return;
+    const fwd = unproject(W / 2, H / 2); if (altOf(fwd) > 70 || altOf(fwd) < 3) return;
+    const fr = grabFrame(ST, 320); if (!fr) return;
+    const { L, aw, ah } = fr; let sum = 0, sum2 = 0;
+    for (let i = 0; i < L.length; i++) { sum += L[i]; sum2 += L[i] * L[i]; }
+    const mean = sum / L.length, sd = Math.sqrt(Math.max(0, sum2 / L.length - mean * mean));
+    if (mean > 110) return; // too bright: daylight or lit scene
+    const thr = Math.max(mean + 5 * sd, mean + 40, 55), pts = [];
+    for (let y = 4; y < ah - 4; y++) for (let x = 4; x < aw - 4; x++) {
+      const i = y * aw + x, l = L[i]; if (l < thr) continue;
+      let peak = true;
+      for (let dy = -3; dy <= 3 && peak; dy++) for (let dx = -3; dx <= 3; dx++) if ((dx || dy) && L[i + dy * aw + dx] > l) { peak = false; break; }
+      if (!peak) continue;
+      const ring = (L[i - 4] + L[i + 4] + L[i - 4 * aw] + L[i + 4 * aw] + L[i - 3 * aw - 3] + L[i - 3 * aw + 3] + L[i + 3 * aw - 3] + L[i + 3 * aw + 3]) / 8;
+      if (ring > mean + 0.55 * (l - mean)) continue; // extended light, not a point
+      const sp = vidToScreen(x + 0.5, y + 0.5, aw); pts.push({ x: sp[0], y: sp[1], l });
+    }
+    pts.sort((a, b) => b.l - a.l); pts.length = Math.min(pts.length, 30);
+    const preds = [];
+    const addP = o => { if (!o.v || altOf(o.v) < 4) return; const p = project(o.v); if (onScreen(p, -12)) preds.push(p); };
+    STARS.forEach(s => { if (s.mag < 3) addP(s); }); PLANETS.forEach(p => { if (p.mag < 2) addP(p); }); addP(MOON);
+    if (preds.length < 3 || pts.length < 3) return;
+    const R = FOC * Math.tan(8 * D2R), B = 7, bins = new Map();
+    preds.forEach((p, pi) => pts.forEach(q => { const dx = q.x - p.x, dy = q.y - p.y; if (dx * dx + dy * dy > R * R) return; const k = Math.round(dx / B) + ',' + Math.round(dy / B); let b = bins.get(k); if (!b) bins.set(k, b = []); b.push({ pi, dx, dy }); }));
+    let best = null, bestN = 0;
+    for (const [k, b] of bins) {
+      const [bx, by] = k.split(',').map(Number), all = [];
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const nb = bins.get((bx + i) + ',' + (by + j)); if (nb) all.push(...nb); }
+      const n = new Set(all.map(e => e.pi)).size;
+      if (n > bestN) { bestN = n; best = all; }
+    }
+    if (!best || bestN < 3) return;
+    const mx = best.reduce((a, e) => a + e.dx, 0) / best.length, my = best.reduce((a, e) => a + e.dy, 0) / best.length;
+    const rms = Math.sqrt(best.reduce((a, e) => a + (e.dx - mx) ** 2 + (e.dy - my) ** 2, 0) / best.length) / FOC * R2D;
+    const delta = wrap180(azOf(unproject(W / 2 - mx, H / 2 - my)) - azOf(fwd));
+    if (Math.abs(delta) > 15) return;
+    S.hcorr = wrap180(S.hcorr + delta * 0.6); ls.set('hcorr', S.hcorr);
+    ST.last = Date.now(); ST.n = bestN; ST.rms = rms;
+  }
+
+  // ---------- meteor auto-catch: look for a fast streak between camera frames ----------
+  const MC = { cv: null, cx: null, at: 0, prev: null, cool: 0 };
+  function meteorWatch(nowP) {
+    if (!S.autoCatch || S.mode !== 'ar' || S.view !== 'meteor' || !cam.videoWidth) { MC.prev = null; return; }
+    if (nowP - MC.at < 110) return; MC.at = nowP;
+    if (S.angVel > 1.2) { MC.prev = null; return; }
+    const fr = grabFrame(MC, 200); if (!fr) return;
+    const { L, aw } = fr, P = MC.prev; MC.prev = L;
+    if (!P || P.length !== L.length || nowP < MC.cool) return;
+    let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+    for (let i = 0; i < L.length; i++) if (L[i] - P[i] > 38) { const x = i % aw, y = (i / aw) | 0; n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; if (n > 600) return; }
+    if (n < 6) return;
+    const mx = sx / n, my = sy / n, cxx = sxx / n - mx * mx, cyy = syy / n - my * my, cxy = sxy / n - mx * my;
+    const tr = cxx + cyy, det = cxx * cyy - cxy * cxy, disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+    const l1 = tr / 2 + disc, l2 = Math.max(0.05, tr / 2 - disc);
+    if (Math.sqrt(l1 / l2) > 4 && 4 * Math.sqrt(l1) > 10) {
+      MC.cool = nowP + 4000; S.caught++; cardFor = null;
+      snapshot('POSSIBLE METEOR').then(() => toast('Caught a possible meteor. It is in your snapshots.'));
+    }
   }
 
   // ---------- alarms ----------
@@ -1287,6 +1596,18 @@
 
   // ---------- chips & filters ----------
   function renderChips() {
+    if (S.view === 'deep') {
+      const c = [['all', 'Everything'], ['eye', 'Naked eye'], ['bino', 'Binoculars'], ['galaxy', 'Galaxies'], ['nebula', 'Nebulae'], ['cluster', 'Clusters']];
+      $('#chips').innerHTML = c.map(([id, n]) => `<button type="button" class="chip glass" data-p="${id}" aria-pressed="${S.deepPreset === id}">${n}</button>`).join('');
+      $$('#chips .chip').forEach(b => b.onclick = () => { S.deepPreset = b.dataset.p; renderChips(); });
+      return;
+    }
+    if (S.view === 'meteor') {
+      const now = simNow(), feat = featuredShower(now), list = activeShowers(now).concat(nextShowers(now, 5)).filter((x, i, a) => a.findIndex(y => y.name === x.name) === i).slice(0, 6);
+      $('#chips').innerHTML = list.map(sh => `<button type="button" class="chip glass" data-p="${esc(sh.name)}" aria-pressed="${feat && feat.name === sh.name}">${esc(sh.name)} <span class="n">${sh.peak.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span></button>`).join('');
+      $$('#chips .chip').forEach(b => b.onclick = () => { S.feat = b.dataset.p; cardFor = null; renderChips(); updateCard(simNow(), true); });
+      return;
+    }
     const counts = { all: Sats.list.length, stations: 0, starlink: 0, new: 0 };
     for (const s of Sats.list) { if (s.groups.has('stations')) counts.stations++; if (s.groups.has('starlink')) counts.starlink++; if (s.groups.has('last-30-days')) counts.new++; }
     const chips = [['all', 'Everything', counts.all], ['visible', 'Visible now'], ['stations', 'Stations', counts.stations], ['starlink', 'Starlink', counts.starlink], ['new', 'New launches', counts.new]];
@@ -1334,13 +1655,31 @@
     for (const s of Sats.list) { if (s.name.toLowerCase().includes(q) || String(s.id) === q || (SPECIAL[s.id] || '').toLowerCase().includes(q)) { res.push(s); if (res.length >= 8) break; } }
     for (const s of STARS) if (s.name.toLowerCase().includes(q) && res.length < 10) res.push(s);
     for (const p of PLANETS) if (p.name.toLowerCase().includes(q)) res.push(p);
-    out.innerHTML = res.length ? res.map((s, i) => `<button type="button" data-i="${i}"><span>${esc(s.kind === 'sat' ? s.name : s.name)}</span><span>${s.kind === 'sat' ? 'NORAD ' + s.id : s.kind.toUpperCase()}</span></button>`).join('') : '<p class="muted">No match in the loaded data. Turn on more groups above.</p>';
+    for (const d of DSOS) if ((d.name + ' ' + d.id).toLowerCase().includes(q) && res.length < 14) res.push(d);
+    for (const pb of PROBES.concat([JWST])) if ((pb.name + ' ' + (pb.short || '')).toLowerCase().includes(q)) res.push(pb);
+    out.innerHTML = res.length ? res.map((s, i) => `<button type="button" data-i="${i}"><span>${esc(s.kind === 'sat' ? s.name : s.name)}</span><span>${s.kind === 'sat' ? 'NORAD ' + s.id : s.kind === 'dso' ? DSO_TYPE[s.type].toUpperCase() : s.kind === 'probe' ? 'SPACECRAFT' : s.kind.toUpperCase()}</span></button>`).join('') : '<p class="muted">No match in the loaded data. Turn on more groups above.</p>';
     $$('button', out).forEach(b => b.onclick = () => {
-      const o = res[+b.dataset.i]; closeSheets(); select(o);
+      const o = res[+b.dataset.i]; closeSheets();
+      if ((o.kind === 'dso' || o.kind === 'probe') && S.view !== 'deep') setView('deep');
+      select(o);
       if (S.mode === 'sky') { const v = o.kind === 'sat' ? (o.v ? satDir(o, simNow().getTime()) : null) : o.v; if (v) { S.viewAz = azOf(v); S.viewAlt = clamp(altOf(v), -10, 85); } }
       toast('Tracking ' + o.name + '. Follow the arrow if it is out of view.');
     });
   });
+
+  // ---------- modes ----------
+  function setView(v) {
+    S.view = v; S.sel = null; cardFor = null;
+    document.body.classList.toggle('v-deep', v === 'deep'); document.body.classList.toggle('v-meteor', v === 'meteor');
+    $$('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
+    if (v !== 'meteor') S.autoCatch = false;
+    if (v === 'meteor') S.featObj = null;
+    renderChips(); select(null);
+    if (v === 'meteor') { const f = featuredShower(simNow()); if (f) { S.featObj = Object.assign({}, f, { rv: radiantVec(f, simNow()), alt: altOf(radiantVec(f, simNow())) }); updateCard(simNow(), true); } }
+    toast(v === 'deep' ? 'Deep space: galaxies, nebulae, clusters and far-away spacecraft.' : v === 'meteor' ? 'Meteor mode: the radiant and the best place to look.' : 'Orbit: everything circling Earth.');
+  }
+  $$('#modeSeg button').forEach(b => b.onclick = () => setView(b.dataset.v));
+  $$('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === 'orbit'));
 
   // ---------- sheets ----------
   function openSheet(id) {
@@ -1420,11 +1759,11 @@
     passes.sort((a, b) => a.p.vStart - b.p.vStart);
     if (passes.length) {
       const best = passes.slice().sort((a, b) => (b.p.maxEl - b.p.mag * 4) - (a.p.maxEl - a.p.mag * 4))[0];
-      const bp = best.p, nm = SPECIAL[best.s.id];
+      const bp = best.p, nm = SPECIAL[best.s.id]; S.bestPass = best;
       const mins = Math.round((bp.vStart - Date.now()) / 60000);
       parts.push(`<div class="sec-label">Best pass</div><div class="hero"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><div class="mono" style="font-size:9.5px;letter-spacing:1.4px;color:var(--accent)">${esc(nm.toUpperCase())} FLYOVER</div><div style="font:700 20px var(--display)">${dfmt(new Date(bp.vStart))}</div></div><div style="text-align:right"><div class="mono" style="font-size:20px;font-weight:600">${tfmt(new Date(bp.vStart))}</div><div class="mono" style="font-size:9.5px;color:var(--dim)">${mins > 0 ? 'IN ' + (mins >= 60 ? Math.floor(mins / 60) + 'H ' : '') + (mins % 60) + 'M' : 'NOW'}</div></div></div>
         <div class="mono" style="font-size:10.5px;color:var(--dim);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>RISES ${cardinal(bp.vStartAz)}</span><span>MAX ${Math.round(bp.maxEl)}°</span><span>SETS ${cardinal(bp.vEndAz)}</span><span>MAG ${bp.mag.toFixed(1)}</span><span>${Math.max(1, Math.round((bp.vEnd - bp.vStart) / 60000))} MIN</span></div>
-        <div class="row"><button type="button" class="btn primary small" data-remind="${best.s.id}:${bp.vStart}:${Math.round(bp.vStartAz)}">Remind me 2 min before</button><button type="button" class="btn small" data-preview="${bp.maxT}" data-sel="${best.s.id}">Preview</button></div></div>`);
+        <div class="row"><button type="button" class="btn primary small" data-remind="${best.s.id}:${bp.vStart}:${Math.round(bp.vStartAz)}">Remind me</button><button type="button" class="btn small" data-cal="${best.s.id}">Add to calendar</button><button type="button" class="btn small" data-preview="${bp.maxT}" data-sel="${best.s.id}">Preview</button></div></div>`);
       evCount++;
       const rest = passes.filter(x => x !== best).slice(0, 5);
       if (rest.length) parts.push('<div class="list">' + rest.map(x => evRow('pass', '#5ad1ff', esc(SPECIAL[x.s.id]) + ' pass', tfmt(new Date(x.p.vStart)), '', `${dfmt(new Date(x.p.vStart)).toUpperCase()} · ${cardinal(x.p.vStartAz)}→${cardinal(x.p.vEndAz)} · MAX ${Math.round(x.p.maxEl)}° · MAG ${x.p.mag.toFixed(1)}`)).join('') + '</div>');
@@ -1520,6 +1859,7 @@
     const b = $('#evBadge'); b.hidden = !evCount; b.textContent = evCount;
   }
   function wireTonight() {
+    $$('[data-cal]').forEach(b => b.onclick = () => { if (S.bestPass) passToCalendar(S.bestPass.s, S.bestPass.p); });
     $$('[data-remind]').forEach(b => b.onclick = () => { const [id, t, az] = b.dataset.remind.split(':').map(Number); const s = Sats.byId.get(id); if (s) addAlarm(s, { vStart: t, vStartAz: az }); });
     $$('[data-preview]').forEach(b => b.onclick = () => { closeSheets(); setOffset(+b.dataset.preview - Date.now()); const s = Sats.byId.get(+b.dataset.sel); if (s) select(s); toast('Previewing the pass at its highest point. Tap LIVE to return.'); });
   }
@@ -1536,7 +1876,8 @@
       <input type="range" id="fovIn" min="40" max="90" step="1" value="${S.fov}" aria-label="Camera field of view">
       <p class="muted" style="margin:0">If labels drift apart from the real stars toward the edges of the screen, adjust this until they line up. Most phone main cameras are 64–70°.</p>
       <div class="sec-label">Compass</div>
-      <div class="kv"><span>Correction from your last alignment</span><span>${S.hcorr.toFixed(1)}°</span></div>
+      <div class="li"><div class="grow"><span class="t">Automatic star lock</span><span class="s">When bright stars show in the camera, use them to correct the compass by itself</span></div><button type="button" class="switch" role="switch" id="autoStarSw" aria-checked="${!!S.f.autoStar}"><span></span></button></div>
+      <div class="kv"><span>Current compass correction</span><span>${S.hcorr.toFixed(1)}°</span></div>
       <div class="inline"><button type="button" class="btn small" id="setAlign">Align now</button><button type="button" class="btn small" id="clrAlign">Clear correction</button></div>
       <div class="sec-label">Orbit data <button type="button" class="btn small" id="refresh">Refresh now</button></div>
       <div>${ages || '<p class="muted">Nothing loaded yet.</p>'}</div>
@@ -1546,12 +1887,13 @@
     $('#locGps').onclick = async () => { toast('Finding you…'); const ok = await requestGPS(); toast(ok ? 'Location updated from GPS.' : 'Could not get GPS. Check location permission.'); buildSettings(); };
     $('#fovIn').oninput = e => { S.fov = +e.target.value; ls.set('fov', S.fov); $('#fovLabel').textContent = S.fov + '°'; };
     $('#setAlign').onclick = () => { closeSheets(); setAlign(true); };
+    $('#autoStarSw').onclick = () => { S.f.autoStar = !S.f.autoStar; saveFilters(); buildSettings(); };
     $('#clrAlign').onclick = () => { S.hcorr = 0; ls.set('hcorr', 0); S.alignedAt = 0; ls.set('alignedAt', 0); toast('Compass correction cleared.'); buildSettings(); };
     $('#refresh').onclick = async () => { toast('Refreshing orbit data…'); await Promise.all(GROUPS.filter(gr => S.f.groups[gr.id] || Sats.status[gr.id]).map(gr => loadGroup(gr.id, true))); tonightDirty = true; toast('Orbit data refreshed.'); buildSettings(); };
   }
 
   // ---------- snapshots ----------
-  async function snapshot() {
+  async function snapshot(tag) {
     const c = document.createElement('canvas'); c.width = sky.width; c.height = sky.height;
     const x = c.getContext('2d');
     x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
@@ -1567,7 +1909,7 @@
     const now = simNow(), fwd = [-VM[2], -VM[5], -VM[8]], s = DPR;
     const gr = x.createLinearGradient(0, c.height - 90 * s, 0, c.height); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.75)');
     x.fillStyle = gr; x.fillRect(0, c.height - 90 * s, c.width, 90 * s);
-    x.fillStyle = C('#ffffff'); x.font = `700 ${14 * s}px "Space Grotesk", Inter, sans-serif`; x.fillText('SKY WATCH', 16 * s, c.height - 40 * s);
+    x.fillStyle = C('#ffffff'); x.font = `700 ${14 * s}px "Space Grotesk", Inter, sans-serif`; x.fillText('SKY WATCH' + (tag ? ' · ' + tag : ''), 16 * s, c.height - 40 * s);
     x.font = `500 ${10 * s}px "JetBrains Mono", monospace`; x.fillStyle = C('#c9d6f5');
     x.fillText(`${now.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }).toUpperCase()} · AZ ${azOf(fwd).toFixed(0)}° · ALT ${altOf(fwd).toFixed(0)}° · ${fmt((S.counts || {}).inView || 0)} SATELLITES IN FRAME`, 16 * s, c.height - 22 * s);
     const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
@@ -1580,7 +1922,7 @@
     setGalleryThumb(thumb);
     const fl = $('#flash'); fl.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => fl.classList.remove('on')));
     try { navigator.vibrate && navigator.vibrate(30); } catch (e) { /* ignore */ }
-    toast('Snapshot saved. Tap the thumbnail to share it.');
+    if (!tag) toast('Snapshot saved. Tap the thumbnail to share it.');
   }
   function setGalleryThumb(src) { $('#galleryBtn').innerHTML = src ? `<img alt="" src="${src}">` : '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>'; }
   async function buildGallery() {
@@ -1603,7 +1945,7 @@
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sky Watch' }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
     const a = document.createElement('a'); a.href = viewURL; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   };
-  $('#shutter').onclick = () => snapshot().catch(e => toast('Snapshot failed: ' + e.message));
+  $('#shutter').onclick = () => snapshot('').catch(e => toast('Snapshot failed: ' + e.message));
 
   // ---------- start ----------
   function showHUD() {
