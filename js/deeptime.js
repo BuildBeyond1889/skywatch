@@ -136,7 +136,8 @@ function drawDeepTime(now, placed, t) {
   if (S.world !== 'sky') return;
   const lst = gmst(now) + S.obs.lon * D2R;
   // Halley
-  const h = halleyAt(t);
+  if (!DTC.at || Math.abs(performance.now() - DTC.at) > 1000 || Math.abs(t - DTC.t) > 36e5) { DTC.at = performance.now(); DTC.t = t; DTC.h = halleyAt(t); DTC.pole = (DT.on || S.sel === POLE_OBJ) ? poleInfo() : null; }
+  const h = DTC.h;
   if (h && h.mag < 9) {
     const p0 = precess(h.raH, h.decD, now), v = refract(eqToEnu(p0.ra, p0.dec, lst, S.obs)), q = project(v);
     HALLEY_OBJ.v = v; HALLEY_OBJ.info = h;
@@ -170,7 +171,7 @@ function drawDeepTime(now, placed, t) {
   }
   // the celestial pole and whichever star is nearest it in this era
   if (DT.on || S.sel === POLE_OBJ) {
-    const pi = poleInfo(), q = project(pi.v); POLE_OBJ.v = pi.v; POLE_OBJ.info = pi;
+    const pi = DTC.pole || poleInfo(), q = project(pi.v); POLE_OBJ.v = pi.v; POLE_OBJ.info = pi;
     if (onScreen(q, 0)) {
       g.strokeStyle = C('#9fe0ff', 0.8); g.lineWidth = 1.2; g.beginPath(); g.arc(q.x, q.y, 10, 0, 6.283); g.moveTo(q.x - 16, q.y); g.lineTo(q.x + 16, q.y); g.moveTo(q.x, q.y - 16); g.lineTo(q.x, q.y + 16); g.stroke();
       label(placed, q.x, q.y, 12, (pi.north ? 'North' : 'South') + ' celestial pole', pi.star && pi.sep < 6 ? 'POLE STAR: ' + pi.star.name.toUpperCase() + ' · ' + pi.sep.toFixed(1) + '° AWAY' : 'NO BRIGHT POLE STAR IN THIS ERA', C('#ffffff'), C('#9fe0ff'), 8, true);
@@ -178,6 +179,7 @@ function drawDeepTime(now, placed, t) {
     }
   }
 }
+const DTC = { at: 0, t: 0, h: null, pole: null };
 const HALLEY_OBJ = { kind: 'deepobj', sub: 'halley', name: 'Halley’s Comet' };
 const POLE_OBJ = { kind: 'deepobj', sub: 'pole', name: 'Celestial pole' };
 function deepCard(o) {
@@ -190,25 +192,43 @@ function deepCard(o) {
 function deepCompact(o) { return `<button type="button" class="mini"><b>${esc(o.name)}</b><span class="mono">${o.sub === 'pole' ? 'THE SKY TURNS AROUND THIS POINT' : o.mag != null ? 'MAG ' + o.mag.toFixed(1) : ''}</span></button>`; }
 
 // ---------- the Deep time panel ----------
-const DT = { on: false, year: 2026, play: 0 };
-function setDeepYear(y, keepDay) {
+const DT = { on: false, year: 2026, filter: 'all', pick: null, list: [] };
+// Load a year (one recompute per tap, never while scrolling)
+function setDeepYear(y) {
   y = Math.round(clamp(y, -9999, 14000)); DT.year = y;
-  const d = new Date(simNow()); const m = keepDay ? d.getUTCMonth() + 1 : 6, dd = keepDay ? d.getUTCDate() : 21;
-  const target = dateAt(y, m, dd, 23);
-  S.rate = 1; S.tmBase = target - Date.now(); setOffset(S.tmBase);
-  renderDeep();
+  S.rate = 1; S.tmBase = dateAt(y, 6, 21, 23) - Date.now(); setOffset(S.tmBase); DTC.at = 0;
+  renderHead();
 }
-function eraEvents(y) {
-  return EVENTS.map(e => ({ e, d: Math.abs(e[0] - y) })).sort((a, b) => a.d - b.d).slice(0, 3).sort((a, b) => a.e[0] - b.e[0]);
-}
-function renderDeep() {
-  if (!DT.on) return;
-  const y = DT.year; $('#dtYear').textContent = yearTxt(y); $('#dtSlider').value = clamp(y, -9999, 10000);
+function renderHead() {
+  $('#dtYear').textContent = yearTxt(DT.year);
   const pi = S.obs ? poleInfo() : null;
-  $('#dtPole').textContent = pi && pi.star && pi.sep < 6 ? 'POLE STAR: ' + pi.star.name.toUpperCase() : 'NO POLE STAR';
-  $('#dtEvents').innerHTML = eraEvents(y).map(({ e }) => `<button type="button" class="dtev${e[5] ? ' sky' : ''}" data-ev="${EVENTS.indexOf(e)}"><span class="mono">${yearTxt(e[0])}</span><b>${esc(e[1])}</b><small>${esc(e[2])}${e[5] ? ' · ★ SEE THE SKY' : e[3] != null ? ' · GO THERE' : ''}</small></button>`).join('');
-  $$('#dtEvents [data-ev]').forEach(b => b.onclick = () => goEvent(EVENTS[+b.dataset.ev]));
+  $('#dtPole').textContent = pi && pi.star && pi.sep < 6 ? 'POLE STAR: ' + pi.star.name.toUpperCase() : 'NO POLE STAR IN THIS ERA';
 }
+function buildWheel() {
+  DT.list = EVENTS.filter(e => DT.filter === 'all' || e[5]).sort((a, b) => a[0] - b[0]);
+  $('#dtItems').innerHTML = DT.list.map((e, i) => `<div class="dtitem${e[5] ? ' sky' : ''}" data-i="${i}"><b>${yearTxt(e[0])}</b><span>${esc(e[1])}</span></div>`).join('');
+  // start on the event nearest the year you're in
+  let k = 0, bd = 1e9; DT.list.forEach((e, i) => { const d = Math.abs(e[0] - DT.year); if (d < bd) { bd = d; k = i; } });
+  $('#dtWheel').scrollTop = k * 40; pickAt(k);
+}
+function pickAt(k) {
+  k = clamp(k, 0, DT.list.length - 1); if (DT.pick === k && $('.dtitem.on')) return;
+  const old = $('.dtitem.on'); if (old) old.classList.remove('on');
+  const el = $(`.dtitem[data-i="${k}"]`); if (el) el.classList.add('on');
+  DT.pick = k; const e = DT.list[k]; if (!e) return;
+  $('#dtWhen').textContent = yearTxt(e[0]).toUpperCase() + (e[5] ? ' · ★ SKY MOMENT' : '');
+  $('#dtWhere').textContent = e[1] + ' · ' + e[2];
+}
+let wheelRaf = 0;
+$('#dtWheel').addEventListener('scroll', () => {
+  S.uiScrollAt = performance.now();
+  if (wheelRaf) return;
+  wheelRaf = requestAnimationFrame(() => { wheelRaf = 0; pickAt(Math.round($('#dtWheel').scrollTop / 40)); });
+}, { passive: true });
+$('#dtItems').addEventListener('click', e => { const it = e.target.closest('.dtitem'); if (!it) return; const k = +it.dataset.i; $('#dtWheel').scrollTo({ top: k * 40, behavior: 'smooth' }); pickAt(k); });
+$('#dtGo').onclick = () => { const e = DT.list[DT.pick]; if (!e) return; goEvent(e); $('#deepBar').classList.add('folded'); $('#dtFold').setAttribute('aria-expanded', 'false'); };
+$('#dtFold').onclick = () => { const f = $('#deepBar').classList.toggle('folded'); $('#dtFold').setAttribute('aria-expanded', String(!f)); if (!f) buildWheel(); };
+$$('.dtfilter button').forEach(b => b.onclick = () => { DT.filter = b.dataset.f; $$('.dtfilter button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); buildWheel(); });
 function aimDeep(aim) {
   let v = null;
   if (aim === 'pole') v = poleInfo().v;
@@ -226,9 +246,12 @@ function goEvent(e) {
   DT.year = e[0];
   const target = dateAt(e[0], mo.m || 6, mo.d || 21, mo.h != null ? mo.h : 22, lon);
   S.rate = 1; S.tmBase = target - Date.now(); setOffset(S.tmBase); S.starsAt = 0; S.planetsAt = 0; S.precessedFor = 0;
-  renderDeep();
+  renderHead();
   // aim once the sky has been recomputed for the new date
+  if (S.sel) select(null);
+  toast(yearTxt(e[0]) + (e[3] != null ? ' · ' + e[2] : '') + ': ' + e[1] + '.', 4500);
   setTimeout(() => {
+    DTC.at = 0; renderHead();
     let v = mo.aim ? aimDeep(mo.aim) : null;
     if (!v && mo.az != null) v = vecAA(mo.az, mo.alt);
     if (v) { if (S.mode === 'sky') { S.viewAz = azOf(v); S.viewAlt = clamp(altOf(v) - 14, -5, 80); S.zoom = 1; } else toast('Look ' + cardinal(azOf(v)) + ', ' + Math.round(altOf(v)) + '° up.', 5000); }
@@ -237,21 +260,15 @@ function goEvent(e) {
   }, 450);
 }
 function openDeepTime() {
-  closeSheets(); DT.on = true; document.body.classList.add('deep'); $('#deepBar').hidden = false;
+  closeSheets(); DT.on = true; document.body.classList.add('deep'); $('#deepBar').hidden = false; $('#deepBar').classList.remove('folded');
   if (S.world !== 'sky') setWorld('sky');
   DT.year = Math.round(yearOf(simNow().getTime()));
-  renderDeep();
-  toast('Deep time: drag through 20,000 years. Satellites vanish; stars drift, the pole star changes and history scrolls by.', 5000);
+  renderHead(); buildWheel();
+  toast('Deep time: scroll through history, then tap Take me there. Tap the year to fold the panel away.', 5000);
 }
 function closeDeepTime() {
-  DT.on = false; DT.play = 0; document.body.classList.remove('deep'); $('#deepBar').hidden = true; S.precessedFor = 0; goLive();
+  DT.on = false; document.body.classList.remove('deep'); $('#deepBar').hidden = true; S.precessedFor = 0; DTC.at = 0; goLive();
 }
-$('#dtSlider').addEventListener('input', e => setDeepYear(+e.target.value));
 $$('#deepBar [data-dy]').forEach(b => b.onclick = () => setDeepYear(DT.year + +b.dataset.dy));
-$('#dtPlay').onclick = () => { DT.play = DT.play ? 0 : 1; $('#dtPlay').textContent = DT.play ? '❚❚' : '▶'; let last = performance.now(); const step = () => { if (!DT.play || !DT.on) return; const n = performance.now(); setDeepYear(DT.year + (n - last) / 1000 * 120); last = n; if (DT.year >= 14000) { DT.play = 0; $('#dtPlay').textContent = '▶'; return; } setTimeout(step, 120); }; step(); };
 $('#dtClose').onclick = closeDeepTime;
-$('#dtMoments').onclick = () => {
-  const L = $('#dtMomentList'); L.hidden = !L.hidden;
-  if (!L.hidden) { L.innerHTML = EVENTS.filter(e => e[5]).map(e => `<button type="button" class="srch-row" data-ev="${EVENTS.indexOf(e)}"><span><b>${esc(e[1])}</b><small class="muted" style="display:block">${esc(e[2])}</small></span><span>${yearTxt(e[0])}</span></button>`).join(''); $$('#dtMomentList [data-ev]').forEach(b => b.onclick = () => { L.hidden = true; goEvent(EVENTS[+b.dataset.ev]); }); }
-};
-setInterval(() => { if (DT.on) { const p = $('#dtPole'); const pi = S.obs ? poleInfo() : null; if (p && pi) p.textContent = pi.star && pi.sep < 6 ? 'POLE STAR: ' + pi.star.name.toUpperCase() : 'NO POLE STAR'; } }, 2000);
+setInterval(() => { if (DT.on && S.obs) renderHead(); }, 3000);

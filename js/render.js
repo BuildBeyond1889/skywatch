@@ -19,7 +19,9 @@
     requestAnimationFrame(frame);
     const t0 = performance.now();
     const moving = S.dragging || ptrs.size > 0 || S.angVel > 1.5 || Math.abs(S.rate) > 1.5 || S.scrubbing || Math.hypot(S.dragYaw, S.dragPitch) > 0.05;
-    const gap = saverOn() ? (moving ? 33 : 66) : (moving ? 0 : 33);
+    // while a menu is open or a list is being scrolled, the sky barely redraws so scrolling stays smooth
+    const busyUI = S.sheetOpen || t0 - (S.uiScrollAt || 0) < 400;
+    const gap = busyUI ? 250 : saverOn() ? (moving ? 33 : 66) : (moving ? 0 : 33);
     if (t0 - lastFrame < gap - 3) return;
     const nowP = t0, dt = clamp((nowP - lastFrame) / 1000, 0, 0.1); lastFrame = nowP; tick++;
     S.ft = (S.ft || 16) * 0.95 + 0.05 * dt * 1000;

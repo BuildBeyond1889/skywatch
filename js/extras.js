@@ -312,7 +312,7 @@ function jumpTo(lat, lon, name, about) {
   setLocation(lat, lon, 'jump'); closeSheets();
   if (S.mode === 'sky') { S.viewAlt = 45; S.zoom = 1; }
   $('#travelPill').hidden = false; updateTravel();
-  toast('You’re at ' + name + (about ? ': ' + about : '') + '. The sky, satellites and radio are live for this spot.' + (S.mode === 'ar' ? ' Your phone is now a window onto its sky.' : ''), 4500);
+  if (!(typeof DT !== 'undefined' && DT.on)) toast('You’re at ' + name + (about ? ': ' + about : '') + '. The sky, satellites and radio are live for this spot.' + (S.mode === 'ar' ? ' Your phone is now a window onto its sky.' : ''), 4500);
 }
 function updateTravel() {
   if (!S.travel) return;

@@ -149,14 +149,14 @@
   // ---------- sheets ----------
   function openSheet(id) {
     closeSheets(true);
-    const s = $('#' + id); s.classList.add('open'); s.setAttribute('aria-hidden', 'false'); $('#scrim').classList.add('on');
+    const s = $('#' + id); s.classList.add('open'); s.setAttribute('aria-hidden', 'false'); $('#scrim').classList.add('on'); S.sheetOpen = true;
     if (id === 'sheetFilters') { renderGroupList(); renderCountryType(); renderLayers(); renderHeight(); renderDensity(); }
     if (id === 'sheetTonight') buildTonight();
     if (id === 'sheetSettings') buildSettings();
     if (id === 'sheetGallery') buildGallery();
     if (id === 'sheetTime') buildTime();
   }
-  function closeSheets() { $$('.sheet').forEach(s => { s.classList.remove('open'); s.setAttribute('aria-hidden', 'true'); }); $('#scrim').classList.remove('on'); }
+  function closeSheets() { $$('.sheet').forEach(s => { s.classList.remove('open'); s.setAttribute('aria-hidden', 'true'); }); $('#scrim').classList.remove('on'); S.sheetOpen = false; }
   $('#scrim').onclick = () => closeSheets();
   $$('[data-close]').forEach(b => b.onclick = () => closeSheets());
   $('#filterBtn').onclick = () => openSheet('sheetFilters');
@@ -452,7 +452,7 @@
     const row = (k, ok, v) => rows.push(`<div class="kv"><span>${ok === true ? '✓' : ok === false ? '✗' : '•'} ${esc(k)}</span><span>${esc(v)}</span></div>`);
     const render = () => { out.innerHTML = rows.join(''); };
     out.innerHTML = '<p class="muted">Checking…</p>';
-    row('App version', null, 'v31 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
+    row('App version', null, 'v32 · ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'offline ready' : 'online only'));
     row('Orbit math library', S.libs.sat, S.libs.sat ? 'loaded' : 'missing');
     row('Planet library', S.libs.astro, S.libs.astro ? 'loaded' : 'missing');
     for (const gr of GROUPS) if (Sats.status[gr.id] != null) row('CelesTrak · ' + gr.name, typeof Sats.status[gr.id] === 'number', typeof Sats.status[gr.id] === 'number' ? fmt(Sats.status[gr.id]) + ' · ' + ((Date.now() - (Sats.age[gr.id] || Date.now())) / 3600e3).toFixed(1) + ' h old' : String(Sats.status[gr.id]));
